@@ -6,3 +6,9 @@ feedparser==6.0.11
 anthropic==0.34.0
 python-dotenv==1.0.1
 APScheduler==3.10.4
+PyJWT==2.8.0
+google-auth==2.25.2
+email-validator==2.1.0.post1
+sendgrid==6.11.0
+jinja2==3.1.2
+premailer==3.10.0

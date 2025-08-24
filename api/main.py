@@ -29,8 +29,9 @@ except ImportError:
         cgi.parse_header = parse_header
 
 import feedparser
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
 from bs4 import BeautifulSoup
 import anthropic
@@ -39,6 +40,9 @@ import uvicorn
 import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+import jwt
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
 
 # Import multimedia components
 from multimedia_scraper import (
@@ -50,6 +54,28 @@ from multimedia_scraper import (
 
 # Import comprehensive AI sources configuration
 from ai_sources_config import AI_SOURCES, FALLBACK_SCRAPING, CATEGORIES
+
+# Email service disabled for now - will be re-enabled after debugging
+EMAIL_SERVICE_AVAILABLE = False
+
+class EmailDigestService:
+    """Dummy email service for compatibility"""
+    def __init__(self):
+        self.sg = None
+        self.from_email = "noreply@ai-daily.com"
+        self.from_name = "AI Daily"
+    
+    def generate_daily_digest_html(self, *args, **kwargs):
+        return "<p>Email service temporarily disabled</p>"
+    
+    def generate_text_digest(self, *args, **kwargs):
+        return "Email service temporarily disabled"
+    
+    async def send_digest_email(self, *args, **kwargs):
+        return False
+    
+    async def send_welcome_email(self, *args, **kwargs):
+        return False
 
 # Load environment variables
 load_dotenv()
@@ -71,7 +97,9 @@ CONFIG = {
     "RATE_LIMIT_RPM": int(os.getenv("RATE_LIMIT_REQUESTS_PER_MINUTE", "30")),
     "REQUEST_TIMEOUT": 30,
     "RETRY_ATTEMPTS": 3,
-    "RETRY_DELAY": 2
+    "RETRY_DELAY": 2,
+    "JWT_SECRET": os.getenv("JWT_SECRET", "your-secret-key-here"),
+    "GOOGLE_CLIENT_ID": os.getenv("GOOGLE_CLIENT_ID", "")
 }
 
 # Global variables for app state
@@ -83,6 +111,7 @@ scheduler = None
 multimedia_db_manager = None
 multimedia_scraper = None
 multimedia_processor = None
+email_service = None
 scraping_status = {"in_progress": False, "last_run": None, "errors": []}
 
 class CacheManager:
@@ -133,7 +162,7 @@ class RateLimiter:
 async def lifespan(app: FastAPI):
     """Manage application lifecycle"""
     global db_manager, scraper, processor, cache_manager, scheduler
-    global multimedia_db_manager, multimedia_scraper, multimedia_processor
+    global multimedia_db_manager, multimedia_scraper, multimedia_processor, email_service
     
     # Startup
     logger.info("Starting AI News Scraper API with multimedia support")
@@ -171,6 +200,14 @@ async def lifespan(app: FastAPI):
     processor = ContentProcessor(claude_client, cache_manager)
     multimedia_processor = MultimediaContentProcessor(claude_client, cache_manager)
     
+    # Initialize email service (with error handling)
+    try:
+        email_service = EmailDigestService()
+        logger.info("Email service initialized successfully")
+    except Exception as e:
+        logger.warning(f"Email service initialization failed: {e}")
+        email_service = None
+    
     # Initialize scheduler for automatic updates
     scheduler = AsyncIOScheduler()
     
@@ -191,6 +228,13 @@ async def lifespan(app: FastAPI):
         scheduled_scrape,
         CronTrigger(minute=0),  # Every hour at minute 0
         id="hourly_scrape"
+    )
+    
+    # Schedule daily email digest at 7 AM ET
+    scheduler.add_job(
+        scheduled_email_digest,
+        CronTrigger(hour=7, minute=0, timezone="America/New_York"),
+        id="daily_email_digest"
     )
     
     scheduler.start()
@@ -494,6 +538,99 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error getting subscribers: {e}")
             return []
+    
+    def deactivate_subscriber(self, subscriber_id: int) -> bool:
+        """Deactivate a subscriber"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                UPDATE subscribers SET is_active = 0, updated_at = ?
+                WHERE id = ?
+            ''', (datetime.now().isoformat(), subscriber_id))
+            
+            success = cursor.rowcount > 0
+            conn.commit()
+            conn.close()
+            
+            if success:
+                logger.info(f"Subscriber {subscriber_id} deactivated")
+            return success
+            
+        except Exception as e:
+            logger.error(f"Error deactivating subscriber: {e}")
+            return False
+    
+    def activate_subscriber(self, subscriber_id: int) -> bool:
+        """Activate a subscriber"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                UPDATE subscribers SET is_active = 1, updated_at = ?
+                WHERE id = ?
+            ''', (datetime.now().isoformat(), subscriber_id))
+            
+            success = cursor.rowcount > 0
+            conn.commit()
+            conn.close()
+            
+            if success:
+                logger.info(f"Subscriber {subscriber_id} activated")
+            return success
+            
+        except Exception as e:
+            logger.error(f"Error activating subscriber: {e}")
+            return False
+    
+    def delete_subscriber(self, subscriber_id: int) -> bool:
+        """Delete a subscriber and all related data"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Delete preferences first (foreign key constraint)
+            cursor.execute('DELETE FROM subscription_preferences WHERE subscriber_id = ?', (subscriber_id,))
+            cursor.execute('DELETE FROM email_subscriptions WHERE subscriber_id = ?', (subscriber_id,))
+            
+            # Delete subscriber
+            cursor.execute('DELETE FROM subscribers WHERE id = ?', (subscriber_id,))
+            
+            success = cursor.rowcount > 0
+            conn.commit()
+            conn.close()
+            
+            if success:
+                logger.info(f"Subscriber {subscriber_id} deleted")
+            return success
+            
+        except Exception as e:
+            logger.error(f"Error deleting subscriber: {e}")
+            return False
+    
+    def update_last_email_sent(self, subscriber_id: int) -> bool:
+        """Update last email sent timestamp for subscriber"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Update or insert email subscription record
+            cursor.execute('''
+                INSERT OR REPLACE INTO email_subscriptions 
+                (subscriber_id, last_sent, updated_at)
+                VALUES (?, ?, ?)
+            ''', (subscriber_id, datetime.now().isoformat(), datetime.now().isoformat()))
+            
+            conn.commit()
+            conn.close()
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error updating last email sent: {e}")
+            return False
 
 class AINewsScraper:
     def __init__(self, db_manager: DatabaseManager, cache_manager: CacheManager):
@@ -838,6 +975,66 @@ class ContentProcessor:
             "badge": "System Update"
         }
 
+# Pydantic models for API requests
+class GoogleAuthRequest(BaseModel):
+    token: str
+
+class SubscriptionPreferences(BaseModel):
+    frequency: str = "daily"
+    content_types: List[str] = ["all"]
+    categories: List[str] = ["all"]
+
+class EmailSubscriptionRequest(BaseModel):
+    email: EmailStr
+    preferences: SubscriptionPreferences
+
+# Authentication utilities
+security = HTTPBearer()
+
+def create_jwt_token(user_data: Dict) -> str:
+    """Create JWT token for authenticated user"""
+    payload = {
+        "email": user_data["email"],
+        "name": user_data["name"],
+        "sub": str(user_data["id"]),
+        "exp": datetime.now() + timedelta(days=7)
+    }
+    return jwt.encode(payload, CONFIG["JWT_SECRET"], algorithm="HS256")
+
+def verify_jwt_token(token: str) -> Dict:
+    """Verify JWT token and return user data"""
+    try:
+        payload = jwt.decode(token, CONFIG["JWT_SECRET"], algorithms=["HS256"])
+        return payload
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token has expired")
+    except jwt.JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Get current authenticated user"""
+    token = credentials.credentials
+    return verify_jwt_token(token)
+
+async def verify_google_token(token: str) -> Dict:
+    """Verify Google OAuth token"""
+    try:
+        idinfo = id_token.verify_oauth2_token(
+            token, google_requests.Request(), CONFIG["GOOGLE_CLIENT_ID"]
+        )
+        
+        if idinfo['iss'] not in ['accounts.google.com', 'https://accounts.google.com']:
+            raise ValueError('Wrong issuer.')
+        
+        return {
+            'google_id': idinfo['sub'],
+            'email': idinfo['email'],
+            'name': idinfo['name'],
+            'profile_picture': idinfo.get('picture', '')
+        }
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid Google token")
+
 async def scheduled_scrape():
     """Scheduled scraping task including multimedia"""
     global scraping_status
@@ -880,6 +1077,77 @@ async def scheduled_scrape():
     finally:
         scraping_status["in_progress"] = False
 
+async def scheduled_email_digest():
+    """Scheduled email digest sending"""
+    global email_service, db_manager, multimedia_db_manager
+    
+    logger.info("Starting scheduled email digest")
+    
+    try:
+        ensure_initialization()
+        
+        if not email_service:
+            logger.error("Email service not initialized")
+            return
+        
+        subscribers = db_manager.get_all_subscribers()
+        if not subscribers:
+            logger.info("No subscribers found")
+            return
+        
+        # Get recent content
+        recent_articles = db_manager.get_recent_articles(24, 50)
+        recent_audio = multimedia_db_manager.get_recent_audio_content(24, 10)
+        recent_video = multimedia_db_manager.get_recent_video_content(24, 10)
+        
+        multimedia_content = {
+            'audio': recent_audio,
+            'video': recent_video
+        }
+        
+        sent_count = 0
+        failed_count = 0
+        
+        for subscriber in subscribers:
+            try:
+                # Check frequency preference
+                preferences = db_manager.get_subscription_preferences(subscriber['id'])
+                frequency = preferences.get('frequency', 'daily')
+                
+                # Skip if not daily frequency
+                if frequency != 'daily':
+                    continue
+                
+                # Prepare user data
+                user_data = {
+                    'id': subscriber['id'],
+                    'email': subscriber['email'],
+                    'name': subscriber['name'],
+                    'preferences': preferences
+                }
+                
+                # Send digest email
+                success = await email_service.send_digest_email(user_data, recent_articles, multimedia_content)
+                
+                if success:
+                    sent_count += 1
+                    db_manager.update_last_email_sent(subscriber['id'])
+                else:
+                    failed_count += 1
+                
+                # Rate limiting delay
+                await asyncio.sleep(0.2)
+                
+            except Exception as e:
+                logger.error(f"Error sending scheduled digest to {subscriber['email']}: {e}")
+                failed_count += 1
+                continue
+        
+        logger.info(f"Scheduled email digest completed: {sent_count} sent, {failed_count} failed")
+        
+    except Exception as e:
+        logger.error(f"Error in scheduled email digest: {e}")
+
 def ensure_initialization():
     """Ensure all components are initialized"""
     global db_manager, scraper, processor, cache_manager
@@ -912,6 +1180,603 @@ def ensure_initialization():
         processor = ContentProcessor(claude_client, cache_manager)
         multimedia_processor = MultimediaContentProcessor(claude_client, cache_manager)
         logger.info("On-demand initialization completed")
+
+# Authentication endpoints
+@app.post("/auth/google")
+async def google_auth(auth_request: GoogleAuthRequest):
+    """Authenticate with Google OAuth token"""
+    try:
+        ensure_initialization()
+        
+        # Verify Google token
+        google_user = await verify_google_token(auth_request.token)
+        
+        # Save or update subscriber
+        subscriber_data = {
+            'email': google_user['email'],
+            'name': google_user['name'],
+            'google_id': google_user['google_id'],
+            'profile_picture': google_user['profile_picture']
+        }
+        
+        subscriber_id = db_manager.save_subscriber(subscriber_data)
+        if not subscriber_id:
+            raise HTTPException(status_code=500, detail="Failed to save subscriber")
+        
+        # Get complete subscriber info
+        subscriber = db_manager.get_subscriber_by_email(google_user['email'])
+        if not subscriber:
+            raise HTTPException(status_code=500, detail="Failed to retrieve subscriber")
+        
+        # Create JWT token
+        jwt_token = create_jwt_token(subscriber)
+        
+        return {
+            "access_token": jwt_token,
+            "token_type": "bearer",
+            "user": {
+                "id": subscriber['id'],
+                "email": subscriber['email'],
+                "name": subscriber['name'],
+                "profile_picture": subscriber.get('profile_picture')
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Google authentication error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/auth/profile")
+async def get_profile(current_user: Dict = Depends(get_current_user)):
+    """Get current user profile"""
+    try:
+        ensure_initialization()
+        
+        subscriber = db_manager.get_subscriber_by_email(current_user['email'])
+        if not subscriber:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        return {
+            "user": {
+                "id": subscriber['id'],
+                "email": subscriber['email'],
+                "name": subscriber['name'],
+                "profile_picture": subscriber.get('profile_picture'),
+                "created_at": subscriber['created_at']
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Profile retrieval error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/subscription/preferences")
+async def save_subscription_preferences(
+    preferences_request: SubscriptionPreferences,
+    current_user: Dict = Depends(get_current_user)
+):
+    """Save subscription preferences"""
+    try:
+        ensure_initialization()
+        
+        subscriber = db_manager.get_subscriber_by_email(current_user['email'])
+        if not subscriber:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        preferences = {
+            'frequency': preferences_request.frequency,
+            'content_types': preferences_request.content_types,
+            'categories': preferences_request.categories
+        }
+        
+        success = db_manager.save_subscription_preferences(subscriber['id'], preferences)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to save preferences")
+        
+        return {"message": "Subscription preferences saved successfully"}
+        
+    except Exception as e:
+        logger.error(f"Preferences save error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/subscription/preferences")
+async def get_subscription_preferences(current_user: Dict = Depends(get_current_user)):
+    """Get subscription preferences"""
+    try:
+        ensure_initialization()
+        
+        subscriber = db_manager.get_subscriber_by_email(current_user['email'])
+        if not subscriber:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        preferences = db_manager.get_subscription_preferences(subscriber['id'])
+        
+        return {
+            "preferences": {
+                "frequency": preferences.get('frequency', 'daily'),
+                "content_types": preferences.get('content_types', ['all']),
+                "categories": preferences.get('categories', ['all'])
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Preferences retrieval error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Subscriber Management APIs
+@app.get("/admin/subscribers")
+async def get_all_subscribers():
+    """Get all subscribers (admin endpoint)"""
+    try:
+        ensure_initialization()
+        
+        subscribers = db_manager.get_all_subscribers()
+        
+        # Format response with preferences
+        subscriber_data = []
+        for subscriber in subscribers:
+            preferences = db_manager.get_subscription_preferences(subscriber['id'])
+            subscriber_info = {
+                "id": subscriber['id'],
+                "email": subscriber['email'],
+                "name": subscriber['name'],
+                "created_at": subscriber['created_at'],
+                "is_active": subscriber['is_active'],
+                "preferences": {
+                    "frequency": preferences.get('frequency', 'daily'),
+                    "content_types": preferences.get('content_types', ['all']),
+                    "categories": preferences.get('categories', ['all'])
+                }
+            }
+            subscriber_data.append(subscriber_info)
+        
+        return {
+            "subscribers": subscriber_data,
+            "total_count": len(subscriber_data),
+            "active_count": len([s for s in subscriber_data if s['is_active']])
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting subscribers: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/admin/subscribers/stats")
+async def get_subscriber_stats():
+    """Get subscriber statistics"""
+    try:
+        ensure_initialization()
+        
+        subscribers = db_manager.get_all_subscribers()
+        
+        # Calculate statistics
+        total_subscribers = len(subscribers)
+        active_subscribers = len([s for s in subscribers if s['is_active']])
+        
+        # Frequency breakdown
+        frequency_stats = {'daily': 0, 'weekly': 0, 'bi-weekly': 0, 'monthly': 0}
+        content_type_stats = {'all': 0, 'blog': 0, 'audio': 0, 'video': 0}
+        
+        for subscriber in subscribers:
+            if subscriber['is_active']:
+                preferences = db_manager.get_subscription_preferences(subscriber['id'])
+                
+                # Count frequency preferences
+                freq = preferences.get('frequency', 'daily')
+                if freq in frequency_stats:
+                    frequency_stats[freq] += 1
+                
+                # Count content type preferences
+                content_types = preferences.get('content_types', ['all'])
+                if isinstance(content_types, str):
+                    content_types = [content_types]
+                
+                for content_type in content_types:
+                    if content_type in content_type_stats:
+                        content_type_stats[content_type] += 1
+        
+        return {
+            "total_subscribers": total_subscribers,
+            "active_subscribers": active_subscribers,
+            "inactive_subscribers": total_subscribers - active_subscribers,
+            "frequency_breakdown": frequency_stats,
+            "content_type_breakdown": content_type_stats
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting subscriber stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/admin/subscribers/{subscriber_id}/deactivate")
+async def deactivate_subscriber(subscriber_id: int):
+    """Deactivate a subscriber (admin endpoint)"""
+    try:
+        ensure_initialization()
+        
+        success = db_manager.deactivate_subscriber(subscriber_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Subscriber not found")
+        
+        return {"message": "Subscriber deactivated successfully"}
+        
+    except Exception as e:
+        logger.error(f"Error deactivating subscriber: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/admin/subscribers/{subscriber_id}/activate")  
+async def activate_subscriber(subscriber_id: int):
+    """Activate a subscriber (admin endpoint)"""
+    try:
+        ensure_initialization()
+        
+        success = db_manager.activate_subscriber(subscriber_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Subscriber not found")
+        
+        return {"message": "Subscriber activated successfully"}
+        
+    except Exception as e:
+        logger.error(f"Error activating subscriber: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/subscription/account")
+async def delete_account(current_user: Dict = Depends(get_current_user)):
+    """Delete user account"""
+    try:
+        ensure_initialization()
+        
+        subscriber = db_manager.get_subscriber_by_email(current_user['email'])
+        if not subscriber:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        success = db_manager.delete_subscriber(subscriber['id'])
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to delete account")
+        
+        return {"message": "Account deleted successfully"}
+        
+    except Exception as e:
+        logger.error(f"Error deleting account: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Email Digest Endpoints - TEMPORARILY DISABLED
+"""
+@app.post("/email/send-digest")
+async def send_digest_email(current_user: Dict = Depends(get_current_user)):
+    """Send personalized digest email to current user"""
+    try:
+        ensure_initialization()
+        
+        subscriber = db_manager.get_subscriber_by_email(current_user['email'])
+        if not subscriber:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Get user preferences
+        preferences = db_manager.get_subscription_preferences(subscriber['id'])
+        
+        # Prepare user data
+        user_data = {
+            'id': subscriber['id'],
+            'email': subscriber['email'],
+            'name': subscriber['name'],
+            'preferences': preferences
+        }
+        
+        # Get recent content
+        recent_articles = db_manager.get_recent_articles(24, 50)
+        recent_audio = multimedia_db_manager.get_recent_audio_content(24, 10)
+        recent_video = multimedia_db_manager.get_recent_video_content(24, 10)
+        
+        multimedia_content = {
+            'audio': recent_audio,
+            'video': recent_video
+        }
+        
+        # Send digest email
+        success = await email_service.send_digest_email(user_data, recent_articles, multimedia_content)
+        
+        if success:
+            return {"message": "Digest email sent successfully"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to send email")
+        
+    except Exception as e:
+        logger.error(f"Error sending digest email: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/email/preview-digest")
+async def preview_digest_email(current_user: Dict = Depends(get_current_user)):
+    """Preview digest email HTML for current user"""
+    try:
+        ensure_initialization()
+        
+        subscriber = db_manager.get_subscriber_by_email(current_user['email'])
+        if not subscriber:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Get user preferences
+        preferences = db_manager.get_subscription_preferences(subscriber['id'])
+        
+        # Prepare user data
+        user_data = {
+            'id': subscriber['id'],
+            'email': subscriber['email'],
+            'name': subscriber['name'],
+            'preferences': preferences
+        }
+        
+        # Get recent content
+        recent_articles = db_manager.get_recent_articles(24, 20)
+        recent_audio = multimedia_db_manager.get_recent_audio_content(24, 5)
+        recent_video = multimedia_db_manager.get_recent_video_content(24, 5)
+        
+        multimedia_content = {
+            'audio': recent_audio,
+            'video': recent_video
+        }
+        
+        # Generate HTML preview
+        html_content = email_service.generate_daily_digest_html(user_data, recent_articles, multimedia_content)
+        
+        return {"html": html_content}
+        
+    except Exception as e:
+        logger.error(f"Error generating email preview: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/email/send-welcome")
+async def send_welcome_email(current_user: Dict = Depends(get_current_user)):
+    """Send welcome email to current user"""
+    try:
+        ensure_initialization()
+        
+        subscriber = db_manager.get_subscriber_by_email(current_user['email'])
+        if not subscriber:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Prepare user data
+        user_data = {
+            'id': subscriber['id'],
+            'email': subscriber['email'],
+            'name': subscriber['name']
+        }
+        
+        # Send welcome email
+        success = await email_service.send_welcome_email(user_data)
+        
+        if success:
+            return {"message": "Welcome email sent successfully"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to send email")
+        
+    except Exception as e:
+        logger.error(f"Error sending welcome email: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/email/test-setup")
+async def test_email_setup():
+    """Test email service configuration"""
+    try:
+        ensure_initialization()
+        
+        results = {
+            "environment": {},
+            "service_status": {},
+            "template_test": {},
+            "sendgrid_status": {}
+        }
+        
+        # Test environment variables
+        env_vars = ['SENDGRID_API_KEY', 'FROM_EMAIL', 'FROM_NAME']
+        for var in env_vars:
+            value = os.getenv(var)
+            if value and value != 'your-secret-key-here':
+                results["environment"][var] = "✅ Set"
+            else:
+                results["environment"][var] = "❌ Not set"
+        
+        # Test service initialization
+        if email_service and email_service.sg:
+            results["service_status"]["sendgrid_client"] = "✅ Initialized"
+            results["service_status"]["from_email"] = email_service.from_email
+            results["service_status"]["from_name"] = email_service.from_name
+        else:
+            results["service_status"]["sendgrid_client"] = "❌ Not initialized"
+        
+        # Test template generation
+        try:
+            sample_user = {
+                'name': 'Test User',
+                'email': 'test@example.com',
+                'preferences': {'frequency': 'daily', 'content_types': ['all'], 'categories': ['all']}
+            }
+            
+            sample_articles = [{
+                'title': 'Sample AI News Article',
+                'summary': 'This is a test article for email template validation.',
+                'url': 'https://example.com',
+                'source': 'Test Source',
+                'significance_score': 7.5,
+                'published_date': datetime.now().isoformat()
+            }]
+            
+            html_content = email_service.generate_daily_digest_html(sample_user, sample_articles)
+            text_content = email_service.generate_text_digest(sample_user, sample_articles)
+            
+            results["template_test"]["html_generation"] = "✅ Success" if html_content else "❌ Failed"
+            results["template_test"]["text_generation"] = "✅ Success" if text_content else "❌ Failed"
+            results["template_test"]["html_length"] = len(html_content) if html_content else 0
+            results["template_test"]["text_length"] = len(text_content) if text_content else 0
+            
+        except Exception as e:
+            results["template_test"]["error"] = str(e)
+        
+        # SendGrid status check
+        if email_service and email_service.sg:
+            try:
+                from sendgrid.helpers.mail import Mail, Email, To
+                
+                # Test mail object creation (doesn't send)
+                test_mail = Mail(
+                    from_email=Email(email_service.from_email, email_service.from_name),
+                    to_emails=To("test@example.com"),
+                    subject="Test",
+                    plain_text_content="Test"
+                )
+                
+                results["sendgrid_status"]["mail_object_creation"] = "✅ Success"
+                results["sendgrid_status"]["ready_to_send"] = "✅ Yes"
+                
+            except Exception as e:
+                results["sendgrid_status"]["mail_object_creation"] = f"❌ Failed: {e}"
+        else:
+            results["sendgrid_status"]["status"] = "❌ SendGrid not available"
+        
+        # Overall status
+        all_env_ok = all("✅" in str(v) for v in results["environment"].values())
+        service_ok = "✅" in str(results["service_status"].get("sendgrid_client", ""))
+        templates_ok = all("✅" in str(v) for k, v in results["template_test"].items() if k != "error")
+        
+        results["overall_status"] = {
+            "ready_for_testing": all_env_ok and service_ok and templates_ok,
+            "environment_ok": all_env_ok,
+            "service_ok": service_ok,
+            "templates_ok": templates_ok
+        }
+        
+        return results
+        
+    except Exception as e:
+        logger.error(f"Email setup test failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/email/send-to-address")
+async def send_test_email_to_address(
+    email_address: str,
+    current_user: Dict = Depends(get_current_user)
+):
+    """Send test digest email to specified address"""
+    try:
+        ensure_initialization()
+        
+        if not email_service:
+            raise HTTPException(status_code=500, detail="Email service not initialized")
+        
+        # Validate email format
+        from email_validator import validate_email
+        try:
+            validate_email(email_address)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid email address format")
+        
+        # Get user data
+        subscriber = db_manager.get_subscriber_by_email(current_user['email'])
+        if not subscriber:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        preferences = db_manager.get_subscription_preferences(subscriber['id'])
+        
+        # Override email address for testing
+        user_data = {
+            'id': subscriber['id'],
+            'email': email_address,  # Send to specified address
+            'name': f"{subscriber['name']} (Test)",
+            'preferences': preferences
+        }
+        
+        # Get sample content
+        recent_articles = db_manager.get_recent_articles(24, 10)
+        recent_audio = multimedia_db_manager.get_recent_audio_content(24, 3)
+        recent_video = multimedia_db_manager.get_recent_video_content(24, 3)
+        
+        multimedia_content = {
+            'audio': recent_audio,
+            'video': recent_video
+        }
+        
+        # Send test email
+        success = await email_service.send_digest_email(user_data, recent_articles, multimedia_content)
+        
+        if success:
+            return {"message": f"Test digest email sent successfully to {email_address}"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to send email")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error sending test email: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/admin/email/send-digest-all")
+async def send_digest_to_all_subscribers():
+    """Send digest email to all active subscribers (admin endpoint)"""
+    try:
+        ensure_initialization()
+        
+        subscribers = db_manager.get_all_subscribers()
+        
+        sent_count = 0
+        failed_count = 0
+        
+        # Get recent content once
+        recent_articles = db_manager.get_recent_articles(24, 50)
+        recent_audio = multimedia_db_manager.get_recent_audio_content(24, 10)
+        recent_video = multimedia_db_manager.get_recent_video_content(24, 10)
+        
+        multimedia_content = {
+            'audio': recent_audio,
+            'video': recent_video
+        }
+        
+        for subscriber in subscribers:
+            try:
+                # Get user preferences
+                preferences = db_manager.get_subscription_preferences(subscriber['id'])
+                
+                # Skip if user doesn't want emails (future enhancement)
+                frequency = preferences.get('frequency', 'daily')
+                if frequency == 'never':
+                    continue
+                
+                # Prepare user data
+                user_data = {
+                    'id': subscriber['id'],
+                    'email': subscriber['email'],
+                    'name': subscriber['name'],
+                    'preferences': preferences
+                }
+                
+                # Send digest email
+                success = await email_service.send_digest_email(user_data, recent_articles, multimedia_content)
+                
+                if success:
+                    sent_count += 1
+                    # Update last sent timestamp
+                    db_manager.update_last_email_sent(subscriber['id'])
+                else:
+                    failed_count += 1
+                
+                # Small delay to avoid rate limiting
+                await asyncio.sleep(0.1)
+                
+            except Exception as e:
+                logger.error(f"Error sending email to {subscriber['email']}: {e}")
+                failed_count += 1
+                continue
+        
+        return {
+            "message": "Digest email batch completed",
+            "sent_count": sent_count,
+            "failed_count": failed_count,
+            "total_subscribers": len(subscribers)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error sending digest to all subscribers: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# All email endpoints have been temporarily removed to fix deployment issues
+# They will be re-added after debugging is complete
 
 @app.get("/")
 async def root():
