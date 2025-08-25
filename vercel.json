@@ -1,9 +1,14 @@
 {
   "version": 2,
+  "functions": {
+    "api/main_working.py": {
+      "runtime": "python3.9"
+    }
+  },
   "rewrites": [
     {
       "source": "/(.*)",
-      "destination": "/api/main_clean"
+      "destination": "/api/main_working"
     }
   ],
   "env": {
@@ -13,7 +18,8 @@
     "CACHE_ENABLED": "true",
     "RATE_LIMIT_REQUESTS_PER_MINUTE": "60",
     "FROM_EMAIL": "noreply@ai-daily.com",
-    "FROM_NAME": "AI Daily"
+    "FROM_NAME": "AI Daily",
+    "AUTO_UPDATE_INTERVAL_HOURS": "8"
   },
   "headers": [
     {
@@ -36,6 +42,12 @@
           "value": "public, s-maxage=900, stale-while-revalidate=1800"
         }
       ]
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/update",
+      "schedule": "0 8 * * *"
     }
   ]
 }
