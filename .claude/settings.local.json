@@ -3,12 +3,17 @@
     "allow": [
       "Bash(python:*)",
       "Bash(find:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(vercel:*)",
+      "Bash(curl:*)",
+      "Bash(node:*)",
+      "Bash(pip3 install:*)"
     ],
     "deny": [],
     "ask": [],
     "additionalDirectories": [
-      "/Users/vijayansubramaniyan/Desktop/AI-ML"
+      "/Users/vijayansubramaniyan/Desktop/AI-ML",
+      "/tmp"
     ]
   }
 }

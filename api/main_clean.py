@@ -30,9 +30,10 @@ except ImportError:
         cgi.parse_header = parse_header
 
 import feedparser
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.responses import Response
 from pydantic import BaseModel, EmailStr
 from bs4 import BeautifulSoup
 import anthropic
@@ -45,20 +46,55 @@ import jwt
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 
-# Import multimedia processor
-from multimedia_scraper import (
-    MultimediaContentProcessor,
-    MULTIMEDIA_SOURCES
-)
-
 # Import comprehensive AI sources configuration
 from ai_sources_config import AI_SOURCES, FALLBACK_SCRAPING, CATEGORIES
 
-# Email service enabled
-EMAIL_SERVICE_AVAILABLE = True
+# Import multimedia processor with fallback
+try:
+    from multimedia_scraper import (
+        MultimediaContentProcessor,
+        MULTIMEDIA_SOURCES
+    )
+    MULTIMEDIA_AVAILABLE = True
+except ImportError as e:
+    print(f"Multimedia processor import failed: {e}")  # Use print before logger is set up
+    MULTIMEDIA_AVAILABLE = False
+    
+    class MultimediaContentProcessor:
+        def __init__(self, claude_client, cache_manager):
+            self.has_claude = False
+    
+    MULTIMEDIA_SOURCES = {"audio": [], "video": []}
 
-# Import the real email service
-from email_service import EmailDigestService
+# Email service with fallback handling  
+try:
+    from email_service import EmailDigestService
+    EMAIL_SERVICE_AVAILABLE = True
+    print("Email service successfully imported")
+except ImportError as e:
+    print(f"Email service import failed: {e}")
+    EMAIL_SERVICE_AVAILABLE = False
+    
+    class EmailDigestService:
+        """Fallback email service for when dependencies are missing"""
+        def __init__(self):
+            self.sg = None
+            self.from_email = "noreply@ai-daily.com"
+            self.from_name = "AI Daily"
+        
+        def generate_daily_digest_html(self, user_data, articles, multimedia_content=None):
+            return f"<p>Email service not available. Please set up SendGrid API key and dependencies.</p>"
+        
+        def generate_text_digest(self, user_data, articles):
+            return "Email service not available. Please set up SendGrid API key and dependencies."
+        
+        async def send_digest_email(self, user_data, articles, multimedia_content=None):
+            logger.warning("Email service not available - cannot send email")
+            return False
+        
+        async def send_welcome_email(self, user_data):
+            logger.warning("Email service not available - cannot send welcome email")  
+            return False
 
 # Load environment variables
 load_dotenv()
@@ -240,6 +276,20 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+# Explicit OPTIONS handler for CORS preflight
+@app.options("/{path:path}")
+async def options_handler(request: Request, path: str):
+    """Handle CORS preflight requests"""
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With",
+            "Access-Control-Max-Age": "3600"
+        }
+    )
 
 # Rate limiter
 rate_limiter = RateLimiter(CONFIG["RATE_LIMIT_RPM"])

@@ -1165,8 +1165,8 @@ async def get_archived_digest(archive_date: str):
         logger.error(f"Error getting archived digest: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# For Vercel deployment - export the FastAPI app directly
-handler = app
+# For Vercel deployment - the app is already exported as 'app'
+# Vercel will automatically use the 'app' variable
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
