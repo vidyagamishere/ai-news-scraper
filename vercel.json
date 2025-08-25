@@ -2,7 +2,7 @@
   "version": 2,
   "functions": {
     "api/main_working.py": {
-      "runtime": "python3.9"
+      "runtime": "@vercel/python"
     }
   },
   "rewrites": [
