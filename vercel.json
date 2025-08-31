@@ -2,30 +2,14 @@
   "version": 2,
   "builds": [
     {
-      "src": "api/main_with_auth.py",
+      "src": "api/test.py",
       "use": "@vercel/python"
     }
   ],
   "routes": [
     {
-      "src": "/health",
-      "dest": "api/main_with_auth.py"
-    },
-    {
-      "src": "/auth/(.*)",
-      "dest": "api/main_with_auth.py"
-    },
-    {
-      "src": "/api/(.*)",
-      "dest": "api/main_with_auth.py"
-    },
-    {
-      "src": "/content/(.*)",
-      "dest": "api/main_with_auth.py"
-    },
-    {
       "src": "/(.*)",
-      "dest": "api/main_with_auth.py"
+      "dest": "api/test.py"
     }
   ],
   "env": {
