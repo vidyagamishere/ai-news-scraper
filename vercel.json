@@ -1,10 +1,11 @@
 {
   "version": 2,
-  "functions": {
-    "api/main_with_auth.py": {
-      "runtime": "@vercel/python"
+  "builds": [
+    {
+      "src": "api/main_with_auth.py",
+      "use": "@vercel/python"
     }
-  },
+  ],
   "rewrites": [
     {
       "source": "/(.*)",
