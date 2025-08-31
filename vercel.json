@@ -1,37 +1,15 @@
 {
   "version": 2,
-  "functions": {
-    "api/main_with_auth.py": {
-      "runtime": "python3.11"
-    }
-  },
-  "routes": [
+  "builds": [
     {
-      "src": "/health",
-      "dest": "api/main_with_auth.py"
-    },
-    {
-      "src": "/auth/(.*)",
-      "dest": "api/main_with_auth.py"
-    },
-    {
-      "src": "/subscription/(.*)",
-      "dest": "api/main_with_auth.py"
-    },
-    {
-      "src": "/admin/(.*)",
-      "dest": "api/main_with_auth.py"
-    },
-    {
-      "src": "/api/(.*)",
-      "dest": "api/main_with_auth.py"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "api/main_with_auth.py"
+      "src": "api/app.py",
+      "use": "@vercel/python"
     }
   ],
-  "env": {
-    "PYTHONPATH": "api"
-  }
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "api/app.py"
+    }
+  ]
 }
