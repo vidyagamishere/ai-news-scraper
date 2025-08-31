@@ -1,0 +1,40 @@
+# Enhanced requirements.txt with authentication support
+fastapi==0.104.1
+uvicorn==0.24.0
+pydantic==2.5.0
+python-multipart==0.0.6
+
+# Database
+sqlite3  # Built-in Python module
+
+# Authentication & Security
+PyJWT==2.8.0
+google-auth==2.23.4
+bcrypt==4.1.2
+passlib==1.7.4
+
+# Web scraping and processing
+requests==2.31.0
+beautifulsoup4==4.12.2
+feedparser==6.0.10
+
+# AI/ML
+anthropic==0.7.8
+
+# Email (optional)
+sendgrid==6.10.0
+smtplib  # Built-in Python module
+
+# Environment and configuration
+python-dotenv==1.0.0
+
+# Scheduling
+apscheduler==3.10.4
+
+# CORS
+fastapi-cors==0.0.6
+
+# Development and debugging
+httpx==0.25.2
+pytest==7.4.3
+pytest-asyncio==0.21.1

@@ -1,9 +1,14 @@
 {
   "version": 2,
+  "functions": {
+    "api/main_with_auth.py": {
+      "runtime": "@vercel/python"
+    }
+  },
   "rewrites": [
     {
       "source": "/(.*)",
-      "destination": "/api/main_working"
+      "destination": "/api/main_with_auth"
     }
   ],
   "env": {

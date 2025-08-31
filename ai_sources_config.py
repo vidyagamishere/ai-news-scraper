@@ -1,5 +1,39 @@
 # ai_sources_config.py - Comprehensive AI Sources Configuration
-# 100 Top AI Websites for News and Content Scraping
+# Enhanced with Events and Learning content categories
+
+# Content type definitions - Professional Elite Design
+CONTENT_TYPES = {
+    "all_sources": {
+        "name": "All Sources",
+        "description": "Comprehensive AI content from all our curated sources",
+        "icon": "🌐"
+    },
+    "blogs": {
+        "name": "Blogs",
+        "description": "Expert insights, analysis, and thought leadership articles",
+        "icon": "✍️"
+    },
+    "podcasts": {
+        "name": "Podcasts", 
+        "description": "Audio content, interviews, and discussions from AI leaders",
+        "icon": "🎧"
+    },
+    "videos": {
+        "name": "Videos",
+        "description": "Visual content, presentations, and educational videos",
+        "icon": "📹"
+    },
+    "events": {
+        "name": "Events", 
+        "description": "AI conferences, webinars, workshops, and networking events",
+        "icon": "📅"
+    },
+    "learn": {
+        "name": "Learn",
+        "description": "Courses, tutorials, educational content, and skill development",
+        "icon": "🎓"
+    }
+}
 
 AI_SOURCES = [
     # Tier 1: Major AI Companies & Research Labs (Priority 1)
@@ -242,6 +276,53 @@ AI_SOURCES = [
         "enabled": True,
         "priority": 3,
         "category": "startup"
+    },
+
+    # Blog Sources - Expert Insights & Analysis
+    {
+        "name": "Towards Data Science",
+        "rss_url": "https://towardsdatascience.com/feed",
+        "website": "https://towardsdatascience.com",
+        "enabled": True,
+        "priority": 1,
+        "category": "blogs",
+        "content_type": "blogs"
+    },
+    {
+        "name": "The Gradient Blog",
+        "rss_url": "https://thegradient.pub/rss",
+        "website": "https://thegradient.pub",
+        "enabled": True,
+        "priority": 1,
+        "category": "blogs",
+        "content_type": "blogs"
+    },
+    {
+        "name": "Distill.pub",
+        "rss_url": "https://distill.pub/rss.xml",
+        "website": "https://distill.pub",
+        "enabled": True,
+        "priority": 1,
+        "category": "blogs",
+        "content_type": "blogs"
+    },
+    {
+        "name": "Berkeley AI Research Blog",
+        "rss_url": "https://bair.berkeley.edu/blog/feed.xml",
+        "website": "https://bair.berkeley.edu/blog",
+        "enabled": True,
+        "priority": 1,
+        "category": "blogs",
+        "content_type": "blogs"
+    },
+    {
+        "name": "OpenAI Blog",
+        "rss_url": "https://openai.com/blog/rss.xml",
+        "website": "https://openai.com/blog",
+        "enabled": True,
+        "priority": 1,
+        "category": "blogs",
+        "content_type": "blogs"
     },
 
     # Additional 70+ sources to reach 100 total
@@ -718,6 +799,248 @@ AI_SOURCES = [
         "enabled": True,
         "priority": 5,
         "category": "startup"
+    },
+
+    # Events Sources - AI Conferences, Webinars, Workshops
+    {
+        "name": "AI Events",
+        "rss_url": "https://eventil.com/events.rss?q=artificial+intelligence",
+        "website": "https://eventil.com/events?q=artificial+intelligence",
+        "enabled": True,
+        "priority": 2,
+        "category": "events",
+        "content_type": "events"
+    },
+    {
+        "name": "Meetup AI Events",
+        "rss_url": "https://www.meetup.com/topics/artificial-intelligence/rss/",
+        "website": "https://www.meetup.com/topics/artificial-intelligence/",
+        "enabled": True,
+        "priority": 2,
+        "category": "events",
+        "content_type": "events"
+    },
+    {
+        "name": "NeurIPS Conference",
+        "rss_url": "https://neurips.cc/feed.xml",
+        "website": "https://neurips.cc",
+        "enabled": True,
+        "priority": 1,
+        "category": "events",
+        "content_type": "events"
+    },
+    {
+        "name": "ICML Conference",
+        "rss_url": "https://icml.cc/feed.xml",
+        "website": "https://icml.cc",
+        "enabled": True,
+        "priority": 1,
+        "category": "events",
+        "content_type": "events"
+    },
+    {
+        "name": "AI/ML Conference Hub",
+        "rss_url": "https://aiconference.com/feed/",
+        "website": "https://aiconference.com",
+        "enabled": True,
+        "priority": 2,
+        "category": "events", 
+        "content_type": "events"
+    },
+    {
+        "name": "AI Summit Events",
+        "rss_url": "https://theaisummit.com/feed/",
+        "website": "https://theaisummit.com",
+        "enabled": True,
+        "priority": 2,
+        "category": "events",
+        "content_type": "events"
+    },
+
+    # Podcast Sources - AI Audio Content
+    {
+        "name": "Lex Fridman Podcast",
+        "rss_url": "https://lexfridman.com/feed/podcast/",
+        "website": "https://lexfridman.com/podcast/",
+        "enabled": True,
+        "priority": 1,
+        "category": "podcasts",
+        "content_type": "podcasts"
+    },
+    {
+        "name": "The AI Podcast",
+        "rss_url": "https://blogs.nvidia.com/ai-podcast/feed/",
+        "website": "https://blogs.nvidia.com/ai-podcast/",
+        "enabled": True,
+        "priority": 1,
+        "category": "podcasts",
+        "content_type": "podcasts"
+    },
+    {
+        "name": "Machine Learning Street Talk",
+        "rss_url": "https://anchor.fm/s/26e1b2b8/podcast/rss",
+        "website": "https://www.youtube.com/c/MachineLearningStreetTalk",
+        "enabled": True,
+        "priority": 1,
+        "category": "podcasts",
+        "content_type": "podcasts"
+    },
+    {
+        "name": "Gradient Dissent",
+        "rss_url": "https://wandb.ai/podcast/rss",
+        "website": "https://wandb.ai/podcast",
+        "enabled": True,
+        "priority": 1,
+        "category": "podcasts",
+        "content_type": "podcasts"
+    },
+    {
+        "name": "The TWIML AI Podcast",
+        "rss_url": "https://twimlai.com/feed/podcast/",
+        "website": "https://twimlai.com/podcast/",
+        "enabled": True,
+        "priority": 1,
+        "category": "podcasts",
+        "content_type": "podcasts"
+    },
+
+    # Video Sources - AI Visual Content
+    {
+        "name": "Two Minute Papers",
+        "rss_url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCbfYPyITQ-7l4upoX8nvctg",
+        "website": "https://www.youtube.com/c/TwoMinutePapers",
+        "enabled": True,
+        "priority": 1,
+        "category": "videos",
+        "content_type": "videos"
+    },
+    {
+        "name": "3Blue1Brown",
+        "rss_url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCYO_jab_esuFRV4b17AJtAw",
+        "website": "https://www.youtube.com/c/3blue1brown",
+        "enabled": True,
+        "priority": 1,
+        "category": "videos",
+        "content_type": "videos"
+    },
+    {
+        "name": "Yannic Kilcher",
+        "rss_url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCZHmQk67mSJgfCCTn7xBfew",
+        "website": "https://www.youtube.com/c/YannicKilcher",
+        "enabled": True,
+        "priority": 1,
+        "category": "videos",
+        "content_type": "videos"
+    },
+    {
+        "name": "AI Explained",
+        "rss_url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCNJ1Ymd5yFuUPtn21xtRbbw",
+        "website": "https://www.youtube.com/c/AIExplained-Official",
+        "enabled": True,
+        "priority": 1,
+        "category": "videos",
+        "content_type": "videos"
+    },
+    {
+        "name": "DeepLearning.AI YouTube",
+        "rss_url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCcIXc5mJsHVYTZR1maL5l9w",
+        "website": "https://www.youtube.com/c/Deeplearningai",
+        "enabled": True,
+        "priority": 1,
+        "category": "videos",
+        "content_type": "videos"
+    },
+
+    # Learning Sources - Courses, Tutorials, Educational Content
+    {
+        "name": "Coursera AI Courses",
+        "rss_url": "https://www.coursera.org/browse/data-science/machine-learning.rss",
+        "website": "https://www.coursera.org/browse/data-science/machine-learning",
+        "enabled": True,
+        "priority": 1,
+        "category": "learning",
+        "content_type": "learn"
+    },
+    {
+        "name": "Fast.ai",
+        "rss_url": "https://www.fast.ai/feed.xml",
+        "website": "https://www.fast.ai",
+        "enabled": True,
+        "priority": 1,
+        "category": "learning",
+        "content_type": "learn"
+    },
+    {
+        "name": "Machine Learning Mastery",
+        "rss_url": "https://machinelearningmastery.com/feed/",
+        "website": "https://machinelearningmastery.com",
+        "enabled": True,
+        "priority": 1,
+        "category": "learning",
+        "content_type": "learn"
+    },
+    {
+        "name": "Towards Data Science",
+        "rss_url": "https://towardsdatascience.com/feed",
+        "website": "https://towardsdatascience.com",
+        "enabled": True,
+        "priority": 1,
+        "category": "learning",
+        "content_type": "learn"
+    },
+    {
+        "name": "DeepLearning.AI",
+        "rss_url": "https://www.deeplearning.ai/blog/rss.xml",
+        "website": "https://www.deeplearning.ai/blog",
+        "enabled": True,
+        "priority": 1,
+        "category": "learning",
+        "content_type": "learn"
+    },
+    {
+        "name": "AI Research Blog",
+        "rss_url": "https://ai.googleblog.com/feeds/posts/default",
+        "website": "https://ai.googleblog.com",
+        "enabled": True,
+        "priority": 1,
+        "category": "learning",
+        "content_type": "learn"
+    },
+    {
+        "name": "Papers With Code",
+        "rss_url": "https://paperswithcode.com/feed.xml",
+        "website": "https://paperswithcode.com",
+        "enabled": True,
+        "priority": 1,
+        "category": "learning",
+        "content_type": "learn"
+    },
+    {
+        "name": "Distill.pub",
+        "rss_url": "https://distill.pub/rss.xml",
+        "website": "https://distill.pub",
+        "enabled": True,
+        "priority": 1,
+        "category": "learning",
+        "content_type": "learn"
+    },
+    {
+        "name": "MIT AI News",
+        "rss_url": "https://news.mit.edu/rss/research/artificial-intelligence2",
+        "website": "https://news.mit.edu/topic/artificial-intelligence2",
+        "enabled": True,
+        "priority": 1,
+        "category": "learning",
+        "content_type": "learn"
+    },
+    {
+        "name": "Stanford AI Blog",
+        "rss_url": "https://ai.stanford.edu/blog/rss.xml",
+        "website": "https://ai.stanford.edu/blog",
+        "enabled": True,
+        "priority": 1,
+        "category": "learning",
+        "content_type": "learn"
     }
 ]
 
@@ -733,5 +1056,17 @@ CATEGORIES = [
     "company", "research", "news", "platform", "startup", 
     "international", "robotics", "automotive", "creative", 
     "policy", "language", "gaming", "healthcare", "finance",
-    "hardware", "cloud"
+    "hardware", "cloud", "events", "learning"
 ]
+
+# Content type filtering functions
+def get_sources_by_content_type(content_type):
+    """Filter sources by content type (articles, events, learning)"""
+    if content_type == "articles":
+        return [source for source in AI_SOURCES if source.get("content_type") != "events" and source.get("content_type") != "learning"]
+    return [source for source in AI_SOURCES if source.get("content_type") == content_type]
+
+def get_enabled_sources_by_type(content_type):
+    """Get enabled sources filtered by content type"""
+    sources = get_sources_by_content_type(content_type)
+    return [source for source in sources if source.get("enabled", True)]

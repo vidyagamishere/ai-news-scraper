@@ -1,0 +1,27 @@
+# Ignore unused main files to avoid function limit
+api/main.py
+api/main_clean.py
+api/main_working.py
+api/simple_main.py
+api/test.py
+api/test_minimal.py
+
+# Ignore development files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.log
+.DS_Store
+.env.local
+.env.development
+
+# Ignore large files
+*.db
+*.sqlite
+*.sqlite3
+
+# Ignore temporary files
+/tmp/
+.cache/
