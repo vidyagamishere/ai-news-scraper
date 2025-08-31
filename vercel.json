@@ -2,14 +2,14 @@
   "version": 2,
   "builds": [
     {
-      "src": "api/main_with_auth.py",
+      "src": "api/index.py",
       "use": "@vercel/python"
     }
   ],
   "rewrites": [
     {
       "source": "/(.*)",
-      "destination": "/api/main_with_auth"
+      "destination": "/api/index"
     }
   ],
   "env": {
