@@ -2,8 +2,7 @@
   "version": 2,
   "functions": {
     "api/main_with_auth.py": {
-      "runtime": "python3.9",
-      "maxDuration": 30
+      "runtime": "python3.11"
     }
   },
   "routes": [
