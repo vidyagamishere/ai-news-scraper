@@ -56,14 +56,14 @@ class handler(BaseHTTPRequestHandler):
         auth_token = self.headers.get('Authorization')
         
         try:
-            if self.path == '/health':
+            if self.path == '/api/health' or self.path == '/health':
                 self._send_json_response({
                     "status": "healthy", 
                     "service": "ai-news-scraper",
                     "timestamp": datetime.utcnow().isoformat()
                 })
                 
-            elif self.path == '/api/content-types':
+            elif self.path == '/api/content-types' or self.path == '/content-types':
                 self._send_json_response({
                     "all_sources": {"name": "All Sources", "icon": "🌐"},
                     "blogs": {"name": "Blogs", "icon": "✍️"},
@@ -73,7 +73,7 @@ class handler(BaseHTTPRequestHandler):
                     "learn": {"name": "Learn", "icon": "🎓"}
                 })
                 
-            elif self.path == '/api/digest':
+            elif self.path == '/api/digest' or self.path == '/digest':
                 # Sample digest data with categorized content
                 self._send_json_response({
                     "summary": {
@@ -128,7 +128,7 @@ class handler(BaseHTTPRequestHandler):
                     "badge": "Latest"
                 })
                 
-            elif self.path.startswith('/api/digest/'):
+            elif self.path.startswith('/api/digest/') or self.path.startswith('/digest/'):
                 content_type = self.path.split('/')[-1]
                 content_map = {
                     "blogs": [
@@ -164,7 +164,7 @@ class handler(BaseHTTPRequestHandler):
                     "badge": f"{content_type.title()}"
                 })
                 
-            elif self.path == '/auth/profile':
+            elif self.path == '/api/auth/profile' or self.path == '/auth/profile':
                 user_info = self._get_user_from_token(auth_token)
                 if not user_info:
                     self._send_error_response("Unauthorized", 401)
@@ -177,7 +177,7 @@ class handler(BaseHTTPRequestHandler):
                 
                 self._send_json_response(user)
                 
-            elif self.path == '/topics':
+            elif self.path == '/api/topics' or self.path == '/topics':
                 self._send_json_response([
                     {"id": 1, "name": "Machine Learning", "description": "ML and deep learning updates", "selected": False},
                     {"id": 2, "name": "AI Research", "description": "Latest research papers and findings", "selected": False},
@@ -204,7 +204,7 @@ class handler(BaseHTTPRequestHandler):
                 self._send_error_response("Invalid JSON format", 400)
                 return
             
-            if self.path == '/auth/login':
+            if self.path == '/api/auth/login' or self.path == '/auth/login':
                 # Validate required fields
                 email = data.get('email', '').strip().lower()
                 password = data.get('password', '')
@@ -244,7 +244,7 @@ class handler(BaseHTTPRequestHandler):
                     "token": token
                 })
                 
-            elif self.path == '/auth/signup':
+            elif self.path == '/api/auth/signup' or self.path == '/auth/signup':
                 # Validate required fields
                 name = data.get('name', '').strip()
                 email = data.get('email', '').strip().lower()
@@ -299,7 +299,7 @@ class handler(BaseHTTPRequestHandler):
                     "token": token
                 }, 201)
                 
-            elif self.path == '/auth/google':
+            elif self.path == '/api/auth/google' or self.path == '/auth/google':
                 # Google OAuth simulation
                 id_token = data.get('idToken', '')
                 
@@ -331,7 +331,7 @@ class handler(BaseHTTPRequestHandler):
                     "token": token
                 })
                 
-            elif self.path == '/api/scrape':
+            elif self.path == '/api/scrape' or self.path == '/scrape':
                 # Simulate manual scraping
                 self._send_json_response({
                     "message": "Manual scrape initiated",
@@ -364,7 +364,7 @@ class handler(BaseHTTPRequestHandler):
                 self._send_error_response("Invalid JSON format", 400)
                 return
             
-            if self.path == '/auth/preferences':
+            if self.path == '/api/auth/preferences' or self.path == '/auth/preferences':
                 user = self.users_db.get(user_info['user_id'])
                 if not user:
                     self._send_error_response("User not found", 404)
@@ -381,7 +381,7 @@ class handler(BaseHTTPRequestHandler):
                 user_response = {k: v for k, v in user.items() if k != 'password_hash'}
                 self._send_json_response(user_response)
                 
-            elif self.path == '/subscription/upgrade':
+            elif self.path == '/api/subscription/upgrade' or self.path == '/subscription/upgrade':
                 user = self.users_db.get(user_info['user_id'])
                 if not user:
                     self._send_error_response("User not found", 404)
@@ -411,7 +411,7 @@ class handler(BaseHTTPRequestHandler):
                 self._send_error_response("Unauthorized", 401)
                 return
             
-            if self.path == '/auth/logout':
+            if self.path == '/api/auth/logout' or self.path == '/auth/logout':
                 # Remove token
                 if auth_token and auth_token.startswith('Bearer '):
                     token = auth_token[7:]
