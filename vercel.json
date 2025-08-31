@@ -31,9 +31,4 @@
   "env": {
     "PYTHONPATH": "api"
   },
-  "functions": {
-    "api/main_with_auth.py": {
-      "maxDuration": 30
-    }
-  }
 }
