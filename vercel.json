@@ -1,18 +1,48 @@
 {
   "version": 2,
+  "name": "ai-news-scraper-auth",
   "builds": [
     {
-      "src": "api/test.py",
-      "use": "@vercel/python"
+      "src": "api/main_with_auth.py",
+      "use": "@vercel/python",
+      "config": {
+        "maxLambdaSize": "50mb",
+        "runtime": "python3.9"
+      }
     }
   ],
   "routes": [
     {
+      "src": "/health",
+      "dest": "api/main_with_auth.py"
+    },
+    {
+      "src": "/auth/(.*)",
+      "dest": "api/main_with_auth.py"
+    },
+    {
+      "src": "/subscription/(.*)",
+      "dest": "api/main_with_auth.py"
+    },
+    {
+      "src": "/admin/(.*)",
+      "dest": "api/main_with_auth.py"
+    },
+    {
+      "src": "/api/(.*)",
+      "dest": "api/main_with_auth.py"
+    },
+    {
       "src": "/(.*)",
-      "dest": "api/test.py"
+      "dest": "api/main_with_auth.py"
     }
   ],
   "env": {
     "PYTHONPATH": "api"
+  },
+  "functions": {
+    "api/main_with_auth.py": {
+      "maxDuration": 30
+    }
   }
 }
