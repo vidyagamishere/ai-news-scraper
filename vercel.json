@@ -28,7 +28,7 @@
       "headers": [
         {
           "key": "Access-Control-Allow-Origin",
-          "value": "*"
+          "value": "https://ai-news-react-9k8aa6crw-vijayan-subramaniyans-projects-0c70c64d.vercel.app"
         },
         {
           "key": "Access-Control-Allow-Methods", 
