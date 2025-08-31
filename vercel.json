@@ -20,7 +20,10 @@
     "RATE_LIMIT_REQUESTS_PER_MINUTE": "60",
     "FROM_EMAIL": "noreply@ai-daily.com",
     "FROM_NAME": "AI Daily",
-    "AUTO_UPDATE_INTERVAL_HOURS": "8"
+    "AUTO_UPDATE_INTERVAL_HOURS": "8",
+    "CORS_ORIGINS": "*",
+    "JWT_SECRET": "ai-news-jwt-secret-key-2024",
+    "GOOGLE_CLIENT_ID": "450435096536-tbor1sbkbq27si62ps7khr5fdat5indb.apps.googleusercontent.com"
   },
   "headers": [
     {
@@ -28,7 +31,7 @@
       "headers": [
         {
           "key": "Access-Control-Allow-Origin",
-          "value": "https://ai-news-react-r5nbhghfd-vijayan-subramaniyans-projects-0c70c64d.vercel.app"
+          "value": "*"
         },
         {
           "key": "Access-Control-Allow-Methods", 
