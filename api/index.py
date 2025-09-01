@@ -16,7 +16,7 @@ class handler(BaseHTTPRequestHandler):
             response = {
                 "message": "AI News Scraper API with Swagger Documentation",
                 "status": "running", 
-                "version": "2.0.0",
+                "version": "2.0.1",
                 "swagger_ui": "/docs",
                 "openapi_spec": "/openapi.json",
                 "endpoints": {
