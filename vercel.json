@@ -4,5 +4,10 @@
     "api/index.py": {
       "maxDuration": 60
     }
+  },
+  "build": {
+    "env": {
+      "PYTHONPATH": "lib"
+    }
   }
 }

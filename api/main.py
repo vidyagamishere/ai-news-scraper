@@ -45,7 +45,11 @@ from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 
 # Import multimedia components
-from multimedia_scraper import (
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'lib'))
+
+from lib.multimedia_scraper import (
     MultimediaDatabaseManager, 
     MultimediaScraper, 
     MultimediaContentProcessor,
@@ -53,10 +57,10 @@ from multimedia_scraper import (
 )
 
 # Import comprehensive AI sources configuration
-from ai_sources_config import AI_SOURCES, FALLBACK_SCRAPING, CATEGORIES
+from lib.ai_sources_config import AI_SOURCES, FALLBACK_SCRAPING, CATEGORIES
 
 # Import API response models
-from models import (
+from lib.models import (
     GoogleAuthRequest, AuthResponse, UserProfile, SubscriptionPreferences,
     PreferencesResponse, MessageResponse, DigestResponse, ScrapeResponse,
     SourcesResponse, MultimediaScrapeResponse, AudioResponse, VideoResponse,

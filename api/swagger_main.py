@@ -9,7 +9,11 @@ from datetime import datetime
 from typing import List, Dict, Optional
 
 # Import response models
-from models import (
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'lib'))
+
+from lib.models import (
     AuthResponse, UserProfile, SubscriptionPreferences,
     PreferencesResponse, MessageResponse, DigestResponse, ScrapeResponse,
     SourcesResponse, SystemInfo, HealthResponse
