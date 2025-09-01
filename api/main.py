@@ -2328,6 +2328,9 @@ async def get_openapi_spec():
     app.openapi_schema = openapi_schema
     return app.openapi_schema
 
+# For Vercel deployment
+handler = app
+
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
     logger.info(f"Starting AI News Scraper API on port {port}")
