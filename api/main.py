@@ -55,6 +55,15 @@ from multimedia_scraper import (
 # Import comprehensive AI sources configuration
 from ai_sources_config import AI_SOURCES, FALLBACK_SCRAPING, CATEGORIES
 
+# Import API response models
+from models import (
+    GoogleAuthRequest, AuthResponse, UserProfile, SubscriptionPreferences,
+    PreferencesResponse, MessageResponse, DigestResponse, ScrapeResponse,
+    SourcesResponse, MultimediaScrapeResponse, AudioResponse, VideoResponse,
+    MultimediaSourcesResponse, SubscribersResponse, SubscriberStats,
+    SystemInfo, HealthResponse, ErrorResponse
+)
+
 # Email service disabled for now - will be re-enabled after debugging
 EMAIL_SERVICE_AVAILABLE = False
 
@@ -248,8 +257,58 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down AI News Scraper API")
 
 app = FastAPI(
-    title="AI News Scraper API - Optimized", 
-    version="1.1.0",
+    title="AI News Scraper API",
+    version="2.0.0",
+    description="""
+    Comprehensive AI News Scraper API with authentication, content management, and multimedia support.
+    
+    ## Features
+    - **Authentication**: Google OAuth and JWT-based authentication
+    - **Content Scraping**: RSS feed scraping from AI news sources
+    - **Multimedia Support**: Audio and video content processing
+    - **Email Digests**: Personalized email newsletters
+    - **Admin Management**: Subscriber and content management
+    
+    ## Authentication
+    Most endpoints require authentication. Use the `/auth/google` endpoint to authenticate with Google OAuth.
+    Include the returned JWT token in the Authorization header as `Bearer <token>`.
+    
+    ## Rate Limiting
+    API requests are rate-limited to 30 requests per minute per IP.
+    """,
+    contact={
+        "name": "AI News Scraper API Support",
+        "email": "support@ai-news-scraper.com",
+    },
+    license_info={
+        "name": "MIT",
+    },
+    openapi_tags=[
+        {
+            "name": "Authentication",
+            "description": "User authentication and authorization endpoints"
+        },
+        {
+            "name": "Content",
+            "description": "News content and digest endpoints"
+        },
+        {
+            "name": "Multimedia", 
+            "description": "Audio and video content endpoints"
+        },
+        {
+            "name": "Subscription",
+            "description": "User subscription and preference management"
+        },
+        {
+            "name": "Admin",
+            "description": "Administrative endpoints for user management"
+        },
+        {
+            "name": "System",
+            "description": "System health and status endpoints"
+        }
+    ],
     lifespan=lifespan
 )
 
@@ -975,15 +1034,7 @@ class ContentProcessor:
             "badge": "System Update"
         }
 
-# Pydantic models for API requests
-class GoogleAuthRequest(BaseModel):
-    token: str
-
-class SubscriptionPreferences(BaseModel):
-    frequency: str = "daily"
-    content_types: List[str] = ["all"]
-    categories: List[str] = ["all"]
-
+# Legacy model imports (keeping for backward compatibility)
 class EmailSubscriptionRequest(BaseModel):
     email: EmailStr
     preferences: SubscriptionPreferences
@@ -1182,9 +1233,18 @@ def ensure_initialization():
         logger.info("On-demand initialization completed")
 
 # Authentication endpoints
-@app.post("/auth/google")
+@app.post("/auth/google", tags=["Authentication"], response_model=AuthResponse)
 async def google_auth(auth_request: GoogleAuthRequest):
-    """Authenticate with Google OAuth token"""
+    """
+    Authenticate with Google OAuth token.
+    
+    Verifies the Google OAuth token and creates or updates a user account.
+    Returns a JWT token for subsequent API requests.
+    
+    - **token**: Google OAuth ID token from frontend authentication
+    
+    Returns user information and JWT access token.
+    """
     try:
         ensure_initialization()
         
@@ -1226,9 +1286,14 @@ async def google_auth(auth_request: GoogleAuthRequest):
         logger.error(f"Google authentication error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
-@app.get("/auth/profile")
+@app.get("/auth/profile", tags=["Authentication"], response_model=UserProfile)
 async def get_profile(current_user: Dict = Depends(get_current_user)):
-    """Get current user profile"""
+    """
+    Get current authenticated user profile.
+    
+    Requires valid JWT token in Authorization header.
+    Returns complete user profile information.
+    """
     try:
         ensure_initialization()
         
@@ -1250,12 +1315,20 @@ async def get_profile(current_user: Dict = Depends(get_current_user)):
         logger.error(f"Profile retrieval error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/subscription/preferences")
+@app.post("/subscription/preferences", tags=["Subscription"], response_model=MessageResponse)
 async def save_subscription_preferences(
     preferences_request: SubscriptionPreferences,
     current_user: Dict = Depends(get_current_user)
 ):
-    """Save subscription preferences"""
+    """
+    Save user subscription preferences.
+    
+    - **frequency**: Email frequency (daily, weekly, bi-weekly, monthly)
+    - **content_types**: List of preferred content types
+    - **categories**: List of preferred AI categories
+    
+    Requires authentication.
+    """
     try:
         ensure_initialization()
         
@@ -1279,9 +1352,16 @@ async def save_subscription_preferences(
         logger.error(f"Preferences save error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/subscription/preferences")
+@app.get("/subscription/preferences", tags=["Subscription"], response_model=PreferencesResponse)
 async def get_subscription_preferences(current_user: Dict = Depends(get_current_user)):
-    """Get subscription preferences"""
+    """
+    Get user subscription preferences.
+    
+    Returns current user's subscription settings including
+    frequency, content types, and categories.
+    
+    Requires authentication.
+    """
     try:
         ensure_initialization()
         
@@ -1304,9 +1384,16 @@ async def get_subscription_preferences(current_user: Dict = Depends(get_current_
         raise HTTPException(status_code=500, detail=str(e))
 
 # Subscriber Management APIs
-@app.get("/admin/subscribers")
+@app.get("/admin/subscribers", tags=["Admin"], response_model=SubscribersResponse)
 async def get_all_subscribers():
-    """Get all subscribers (admin endpoint)"""
+    """
+    Get all subscribers with their preferences.
+    
+    Administrative endpoint that returns complete list of
+    all subscribers with their preferences and statistics.
+    
+    **Note**: This should be protected with admin authentication in production.
+    """
     try:
         ensure_initialization()
         
@@ -1340,9 +1427,18 @@ async def get_all_subscribers():
         logger.error(f"Error getting subscribers: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/admin/subscribers/stats")
+@app.get("/admin/subscribers/stats", tags=["Admin"], response_model=SubscriberStats)
 async def get_subscriber_stats():
-    """Get subscriber statistics"""
+    """
+    Get detailed subscriber statistics.
+    
+    Returns comprehensive analytics including:
+    - Total and active subscriber counts
+    - Frequency preference breakdown
+    - Content type preference distribution
+    
+    **Note**: This should be protected with admin authentication in production.
+    """
     try:
         ensure_initialization()
         
@@ -1386,9 +1482,17 @@ async def get_subscriber_stats():
         logger.error(f"Error getting subscriber stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/admin/subscribers/{subscriber_id}/deactivate")
+@app.post("/admin/subscribers/{subscriber_id}/deactivate", tags=["Admin"], response_model=MessageResponse)
 async def deactivate_subscriber(subscriber_id: int):
-    """Deactivate a subscriber (admin endpoint)"""
+    """
+    Deactivate a subscriber account.
+    
+    - **subscriber_id**: The ID of the subscriber to deactivate
+    
+    Deactivated users will not receive email digests but can still access the API.
+    
+    **Note**: This should be protected with admin authentication in production.
+    """
     try:
         ensure_initialization()
         
@@ -1402,9 +1506,17 @@ async def deactivate_subscriber(subscriber_id: int):
         logger.error(f"Error deactivating subscriber: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/admin/subscribers/{subscriber_id}/activate")  
+@app.post("/admin/subscribers/{subscriber_id}/activate", tags=["Admin"], response_model=MessageResponse)
 async def activate_subscriber(subscriber_id: int):
-    """Activate a subscriber (admin endpoint)"""
+    """
+    Activate a previously deactivated subscriber account.
+    
+    - **subscriber_id**: The ID of the subscriber to activate
+    
+    Activated users will resume receiving email digests.
+    
+    **Note**: This should be protected with admin authentication in production.
+    """
     try:
         ensure_initialization()
         
@@ -1418,9 +1530,18 @@ async def activate_subscriber(subscriber_id: int):
         logger.error(f"Error activating subscriber: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.delete("/subscription/account")
+@app.delete("/subscription/account", tags=["Subscription"], response_model=MessageResponse)
 async def delete_account(current_user: Dict = Depends(get_current_user)):
-    """Delete user account"""
+    """
+    Permanently delete user account and all associated data.
+    
+    This action is irreversible and will:
+    - Delete user profile
+    - Remove all subscription preferences
+    - Cancel email subscriptions
+    
+    Requires authentication.
+    """
     try:
         ensure_initialization()
         
@@ -1778,7 +1899,7 @@ async def send_digest_to_all_subscribers():
 # All email endpoints have been temporarily removed to fix deployment issues
 # They will be re-added after debugging is complete
 
-@app.get("/")
+@app.get("/", tags=["System"], response_model=SystemInfo)
 async def root():
     ensure_initialization()
     return {
@@ -1788,9 +1909,21 @@ async def root():
         "claude_enabled": processor.has_claude if processor else False
     }
 
-@app.get("/api/digest")
+@app.get("/api/digest", tags=["Content"], response_model=DigestResponse)
 async def get_digest(refresh: Optional[int] = None):
-    """Get AI news digest"""
+    """
+    Get AI news digest with latest articles and multimedia content.
+    
+    - **refresh**: Optional parameter to force refresh from sources (1 for quick refresh)
+    
+    Returns a comprehensive digest including:
+    - Summary with key points and metrics
+    - Top stories ranked by significance
+    - Categorized content (blog, audio, video)
+    - Timestamp and badge information
+    
+    If refresh=1, performs quick refresh of priority sources only.
+    """
     try:
         ensure_initialization()
         if refresh:
@@ -1887,9 +2020,20 @@ async def get_digest(refresh: Optional[int] = None):
         logger.error(f"Error in get_digest: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/scrape")
+@app.get("/api/scrape", tags=["Content"], response_model=ScrapeResponse)
 async def manual_scrape(priority_only: Optional[bool] = False):
-    """Manual scraping - full or priority sources only"""
+    """
+    Manually trigger content scraping from RSS sources.
+    
+    - **priority_only**: If true, only scrape high-priority sources for faster execution
+    
+    Returns information about the scraping operation including:
+    - Number of articles found and processed
+    - List of sources scraped
+    - Claude API availability status
+    
+    This endpoint is useful for testing or forcing immediate content updates.
+    """
     try:
         ensure_initialization()
         
@@ -1928,18 +2072,35 @@ async def manual_scrape(priority_only: Optional[bool] = False):
         logger.error(f"Error in manual_scrape: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/sources")
+@app.get("/api/sources", tags=["Content"], response_model=SourcesResponse)
 async def get_sources():
-    """Get sources"""
+    """
+    Get all configured RSS news sources.
+    
+    Returns:
+    - Complete list of AI news sources with configuration
+    - Count of enabled sources
+    - Claude API availability status
+    """
     return {
         "sources": AI_SOURCES,
         "enabled_count": len([s for s in AI_SOURCES if s.get('enabled', True)]),
         "claude_available": processor.has_claude if processor else False
     }
 
-@app.get("/api/multimedia/scrape")
+@app.get("/api/multimedia/scrape", tags=["Multimedia"], response_model=MultimediaScrapeResponse)
 async def scrape_multimedia():
-    """Manual multimedia scraping"""
+    """
+    Manually trigger multimedia content scraping.
+    
+    Scrapes audio and video content from configured multimedia sources
+    and processes them with AI analysis.
+    
+    Returns:
+    - Count of audio and video content found and processed
+    - List of multimedia sources scraped
+    - Processing status and Claude API availability
+    """
     try:
         multimedia_results = await multimedia_scraper.scrape_all_multimedia()
         
@@ -1972,9 +2133,19 @@ async def scrape_multimedia():
         logger.error(f"Error in multimedia scraping: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/multimedia/audio")
+@app.get("/api/multimedia/audio", tags=["Multimedia"], response_model=AudioResponse)
 async def get_audio_content(hours: int = 24, limit: int = 20):
-    """Get recent audio content"""
+    """
+    Get recent audio content (podcasts, interviews, discussions).
+    
+    - **hours**: Number of hours to look back (default: 24)
+    - **limit**: Maximum number of audio items to return (default: 20)
+    
+    Returns formatted audio content with metadata including:
+    - Title, description, source
+    - Audio URL, duration, publication date
+    - AI-generated significance score and summary
+    """
     try:
         audio_content = multimedia_db_manager.get_recent_audio_content(hours, limit)
         
@@ -2003,9 +2174,19 @@ async def get_audio_content(hours: int = 24, limit: int = 20):
         logger.error(f"Error getting audio content: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/multimedia/video")
+@app.get("/api/multimedia/video", tags=["Multimedia"], response_model=VideoResponse)
 async def get_video_content(hours: int = 24, limit: int = 20):
-    """Get recent video content"""
+    """
+    Get recent video content (presentations, tutorials, talks).
+    
+    - **hours**: Number of hours to look back (default: 24)
+    - **limit**: Maximum number of video items to return (default: 20)
+    
+    Returns formatted video content with metadata including:
+    - Title, description, source
+    - Video URL, thumbnail, duration, publication date
+    - AI-generated significance score and summary
+    """
     try:
         video_content = multimedia_db_manager.get_recent_video_content(hours, limit)
         
@@ -2034,9 +2215,16 @@ async def get_video_content(hours: int = 24, limit: int = 20):
         logger.error(f"Error getting video content: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/multimedia/sources")
+@app.get("/api/multimedia/sources", tags=["Multimedia"], response_model=MultimediaSourcesResponse)
 async def get_multimedia_sources():
-    """Get multimedia sources"""
+    """
+    Get all configured multimedia sources.
+    
+    Returns:
+    - Complete list of audio and video sources with configuration
+    - Count of enabled audio and video sources
+    - Claude API availability for multimedia processing
+    """
     return {
         "sources": MULTIMEDIA_SOURCES,
         "audio_sources": len([s for s in MULTIMEDIA_SOURCES["audio"] if s.get('enabled', True)]),
@@ -2044,9 +2232,20 @@ async def get_multimedia_sources():
         "claude_available": multimedia_processor.has_claude if multimedia_processor else False
     }
 
-@app.get("/api/health")
+@app.get("/api/health", tags=["System"], response_model=HealthResponse)
 async def health_check():
-    """Health check"""
+    """
+    System health check endpoint.
+    
+    Returns status of all system components including:
+    - Database connectivity
+    - Scraper and processor status
+    - Multimedia processing components
+    - Claude API connection
+    - Scheduler status
+    
+    Use this endpoint to monitor system health in production.
+    """
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
@@ -2061,6 +2260,73 @@ async def health_check():
             "scheduler": scheduler.running if scheduler else False
         }
     }
+
+# Documentation endpoints
+@app.get("/docs", include_in_schema=False)
+async def custom_swagger_ui_html():
+    """
+    Custom Swagger UI endpoint with enhanced styling.
+    """
+    from fastapi.openapi.docs import get_swagger_ui_html
+    return get_swagger_ui_html(
+        openapi_url="/openapi.json",
+        title="AI News Scraper API Documentation",
+        swagger_favicon_url="https://fastapi.tiangolo.com/img/favicon.png"
+    )
+
+@app.get("/redoc", include_in_schema=False)
+async def redoc_html():
+    """
+    Alternative API documentation using ReDoc.
+    """
+    from fastapi.openapi.docs import get_redoc_html
+    return get_redoc_html(
+        openapi_url="/openapi.json",
+        title="AI News Scraper API Documentation"
+    )
+
+@app.get("/openapi.json", include_in_schema=False)
+async def get_openapi_spec():
+    """
+    Get OpenAPI specification in JSON format.
+    """
+    from fastapi.openapi.utils import get_openapi
+    if app.openapi_schema:
+        return app.openapi_schema
+    
+    openapi_schema = get_openapi(
+        title="AI News Scraper API",
+        version="2.0.0",
+        description=app.description,
+        routes=app.routes,
+        tags=app.openapi_tags
+    )
+    
+    # Add security schemes
+    openapi_schema["components"]["securitySchemes"] = {
+        "bearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+            "description": "JWT token obtained from /auth/google endpoint"
+        }
+    }
+    
+    # Add global security requirement for protected endpoints
+    protected_paths = [
+        "/auth/profile",
+        "/subscription/preferences", 
+        "/subscription/account"
+    ]
+    
+    for path, path_item in openapi_schema["paths"].items():
+        if any(protected_path in path for protected_path in protected_paths):
+            for method in path_item.values():
+                if isinstance(method, dict) and "operationId" in method:
+                    method["security"] = [{"bearerAuth": []}]
+    
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
