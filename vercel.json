@@ -1,26 +1,8 @@
 {
   "version": 2,
   "functions": {
-    "api/main.py": {
+    "api/index.py": {
       "maxDuration": 60
     }
-  },
-  "routes": [
-    {
-      "src": "/docs",
-      "dest": "/api/main.py"
-    },
-    {
-      "src": "/redoc", 
-      "dest": "/api/main.py"
-    },
-    {
-      "src": "/openapi.json",
-      "dest": "/api/main.py"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/api/main.py"
-    }
-  ]
+  }
 }
