@@ -1,19 +1,36 @@
-from http.server import BaseHTTPRequestHandler
 import json
 from datetime import datetime
+from urllib.parse import urlparse, parse_qs
 
-class handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        # Set CORS headers
-        self.send_response(200)
-        self.send_header('Content-type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-        self.end_headers()
-        
-        if self.path == '/' or self.path == '/api':
-            response = {
+def handler(request, context):
+    """
+    Vercel serverless function handler for AI News Scraper API
+    """
+    
+    # Parse request
+    method = request.get('httpMethod', 'GET')
+    path = request.get('path', '/')
+    
+    # CORS headers
+    headers = {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Content-Type': 'application/json'
+    }
+    
+    # Handle OPTIONS requests
+    if method == 'OPTIONS':
+        return {
+            'statusCode': 200,
+            'headers': headers,
+            'body': ''
+        }
+    
+    # Route handling
+    if method == 'GET':
+        if path == '/' or path == '/api':
+            response_data = {
                 "message": "AI News Scraper API with Swagger Documentation",
                 "status": "running", 
                 "version": "2.0.1",
@@ -26,14 +43,16 @@ class handler(BaseHTTPRequestHandler):
                     "admin": ["/admin/subscribers"]
                 }
             }
-        elif self.path == '/health':
-            response = {
+        
+        elif path == '/health' or path == '/api/health':
+            response_data = {
                 "status": "healthy",
                 "timestamp": datetime.now().isoformat(),
                 "components": {"api": True, "database": True}
             }
-        elif self.path == '/api/digest':
-            response = {
+        
+        elif path == '/api/digest':
+            response_data = {
                 "summary": {
                     "keyPoints": ["OpenAI releases GPT-5 with breakthrough reasoning"],
                     "metrics": {"totalUpdates": 1, "highImpact": 1}
@@ -45,10 +64,10 @@ class handler(BaseHTTPRequestHandler):
                 }],
                 "timestamp": datetime.now().isoformat()
             }
-        elif self.path == '/docs':
-            # Swagger UI HTML
-            swagger_html = '''
-<!DOCTYPE html>
+        
+        elif path == '/docs':
+            # Return Swagger UI HTML
+            swagger_html = '''<!DOCTYPE html>
 <html>
 <head>
     <title>AI News Scraper API Documentation</title>
@@ -69,18 +88,21 @@ class handler(BaseHTTPRequestHandler):
     </script>
 </body>
 </html>'''
-            self.send_response(200)
-            self.send_header('Content-type', 'text/html')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
-            self.wfile.write(swagger_html.encode())
-            return
-        elif self.path == '/openapi.json':
-            response = {
+            return {
+                'statusCode': 200,
+                'headers': {
+                    'Content-Type': 'text/html',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                'body': swagger_html
+            }
+        
+        elif path == '/openapi.json':
+            response_data = {
                 "openapi": "3.0.0",
                 "info": {
                     "title": "AI News Scraper API",
-                    "version": "2.0.0",
+                    "version": "2.0.1",
                     "description": "Comprehensive AI News Scraper API with authentication and content management"
                 },
                 "paths": {
@@ -114,7 +136,8 @@ class handler(BaseHTTPRequestHandler):
                                     "application/json": {
                                         "schema": {
                                             "type": "object",
-                                            "properties": {"token": {"type": "string"}}
+                                            "properties": {"token": {"type": "string"}},
+                                            "required": ["token"]
                                         }
                                     }
                                 }
@@ -138,40 +161,36 @@ class handler(BaseHTTPRequestHandler):
                     {"name": "Authentication", "description": "Auth endpoints"}
                 ]
             }
+        
         else:
-            response = {"error": "Not found", "path": self.path}
-            self.send_response(404)
-            self.send_header('Content-type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
-        
-        self.wfile.write(json.dumps(response).encode())
+            response_data = {"error": "Not found", "path": path}
+            return {
+                'statusCode': 404,
+                'headers': headers,
+                'body': json.dumps(response_data)
+            }
     
-    def do_POST(self):
-        content_length = int(self.headers.get('Content-Length', 0))
-        post_data = self.rfile.read(content_length)
-        
-        self.send_response(200)
-        self.send_header('Content-type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-        self.end_headers()
-        
-        if self.path == '/auth/google':
-            response = {
+    elif method == 'POST':
+        if path == '/auth/google':
+            response_data = {
                 "access_token": "jwt-token-example",
                 "token_type": "bearer",
                 "user": {"email": "user@example.com", "name": "Test User"}
             }
         else:
-            response = {"message": "POST endpoint", "path": self.path}
-        
-        self.wfile.write(json.dumps(response).encode())
+            response_data = {"message": "POST endpoint", "path": path}
     
-    def do_OPTIONS(self):
-        self.send_response(200)
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-        self.end_headers()
+    else:
+        response_data = {"error": "Method not allowed"}
+        return {
+            'statusCode': 405,
+            'headers': headers,
+            'body': json.dumps(response_data)
+        }
+    
+    # Return successful response
+    return {
+        'statusCode': 200,
+        'headers': headers,
+        'body': json.dumps(response_data)
+    }
