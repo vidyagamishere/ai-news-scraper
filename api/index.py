@@ -6,45 +6,52 @@ import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 try:
-    # Import the FastAPI app from main.py
-    from main import app
+    # Import the FastAPI app with Swagger documentation
+    from swagger_main import app
     
     # Export for Vercel
     handler = app
     
 except ImportError as e:
-    # Fallback if main.py import fails
-    print(f"Failed to import main app: {e}")
+    # Fallback if swagger_main.py import fails
+    print(f"Failed to import swagger_main app: {e}")
     
-    from fastapi import FastAPI
-    from fastapi.middleware.cors import CORSMiddleware
-    
-    # Create a minimal fallback app
-    fallback_app = FastAPI(
-        title="AI News Scraper API - Fallback",
-        version="1.0.0",
-        description="Fallback API when main application fails to load"
-    )
-    
-    fallback_app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["*"],
-    )
-    
-    @fallback_app.get("/")
-    def root():
-        return {
-            "message": "AI News Scraper API - Fallback Mode",
-            "status": "running",
-            "version": "1.0.0",
-            "note": "Main application failed to load"
-        }
-    
-    @fallback_app.get("/health")
-    def health():
-        return {"status": "ok", "mode": "fallback"}
-    
-    handler = fallback_app
+    try:
+        # Try main.py as backup
+        from main import app
+        handler = app
+    except ImportError as e2:
+        print(f"Failed to import main app: {e2}")
+        
+        from fastapi import FastAPI
+        from fastapi.middleware.cors import CORSMiddleware
+        
+        # Create a minimal fallback app
+        fallback_app = FastAPI(
+            title="AI News Scraper API - Fallback",
+            version="1.0.0",
+            description="Fallback API when main application fails to load"
+        )
+        
+        fallback_app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "OPTIONS"],
+            allow_headers=["*"],
+        )
+        
+        @fallback_app.get("/")
+        def root():
+            return {
+                "message": "AI News Scraper API - Fallback Mode",
+                "status": "running",
+                "version": "1.0.0",
+                "note": "Main application failed to load"
+            }
+        
+        @fallback_app.get("/health")
+        def health():
+            return {"status": "ok", "mode": "fallback"}
+        
+        handler = fallback_app
