@@ -17,6 +17,12 @@ __pycache__/
 .env.local
 .env.development
 
+# Ignore config files that might interfere
+vercel_auth.json
+vercel-simple.json
+main.py
+main_*.py
+
 # Ignore large files
 *.db
 *.sqlite

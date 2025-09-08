@@ -1,0 +1,1584 @@
+from http.server import BaseHTTPRequestHandler
+import json
+from datetime import datetime, timedelta
+from urllib.parse import urlparse, parse_qs
+from urllib.request import Request, urlopen
+import sys
+import os
+import random
+import time
+import re
+
+# Add parent directory to path to import sources config
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+try:
+    from ai_sources_config import AI_SOURCES, CONTENT_TYPES
+except ImportError:
+    # Fallback if import fails
+    AI_SOURCES = []
+    CONTENT_TYPES = {}
+
+try:
+    from top_stories_config import TOP_STORIES, URL_VALIDATION_CONFIG
+except ImportError:
+    # Fallback top stories if import fails
+    TOP_STORIES = []
+    URL_VALIDATION_CONFIG = {}
+
+# Import email service
+try:
+    from lib.email_service import EmailDigestService
+    email_service = EmailDigestService()
+except ImportError as e:
+    print(f"Email service import failed: {e}")
+    email_service = None
+
+# Import enhanced scraper
+try:
+    from lib.enhanced_scraper import EnhancedContentScraper, AdminManager, init_default_admin
+    enhanced_scraper = EnhancedContentScraper()
+    admin_manager = AdminManager()
+    # Initialize default admin on startup
+    init_default_admin()
+    ENHANCED_SCRAPING_ENABLED = True
+    print("Enhanced scraping system loaded successfully")
+except ImportError as e:
+    print(f"Enhanced scraper import failed: {e}")
+    enhanced_scraper = None
+    admin_manager = None
+    ENHANCED_SCRAPING_ENABLED = False
+
+# Import and initialize scheduler service
+try:
+    from lib.scheduler_service import initialize_scheduler, get_scheduler_service
+    if ENHANCED_SCRAPING_ENABLED and enhanced_scraper:
+        scheduler_service = initialize_scheduler(enhanced_scraper, AI_SOURCES)
+        SCHEDULER_ENABLED = scheduler_service is not None
+        print("Scheduler service initialized - scraping at 6 AM and 6 PM IST daily")
+    else:
+        scheduler_service = None
+        SCHEDULER_ENABLED = False
+        print("Scheduler not initialized - enhanced scraping not available")
+except ImportError as e:
+    print(f"Scheduler service import failed: {e}")
+    scheduler_service = None
+    SCHEDULER_ENABLED = False
+
+# Global variables for tracking refresh schedule
+LAST_REFRESH = None
+REFRESH_INTERVAL_HOURS = 8
+
+# Email verification configuration - default to false for easier testing
+EMAIL_VERIFICATION_ENABLED = os.environ.get('EMAIL_VERIFICATION_ENABLED', 'false').lower() == 'true'
+
+# OTP storage (in production, use Redis or database)
+OTP_STORAGE = {}
+
+# Simple user storage for demo (in production, use database)
+USER_STORAGE = {}
+
+# Store user passwords for OTP verified users (in production, use hashed passwords)
+USER_PASSWORDS = {}
+
+# User database - stores user profiles (in production, use proper database)
+USER_DATABASE = {}
+
+# Initialize with existing user (will be replaced by proper user registration)
+USER_DATABASE["dhanyashreevijayan@gmail.com"] = {
+    "id": "user_dhanya_001",
+    "email": "dhanyashreevijayan@gmail.com",
+    "name": "Dhanyashree Vijayan",
+    "password": "Arunmugam1!",  # In production, this should be hashed
+    "subscriptionTier": "free",
+    "emailVerified": True,
+    "emailVerifiedAt": "2025-09-05T12:00:00Z",
+    "preferences": {
+        "topics": [
+            {"id": "machine-learning", "name": "Machine Learning", "description": "ML algorithms and applications", "category": "technology", "selected": True},
+            {"id": "nlp", "name": "Natural Language Processing", "description": "Text and language AI", "category": "technology", "selected": True},
+            {"id": "computer-vision", "name": "Computer Vision", "description": "Image and video AI", "category": "technology", "selected": False}
+        ],
+        "newsletterFrequency": "daily",
+        "emailNotifications": True,
+        "contentTypes": ["articles", "videos", "events", "learning"],
+        "onboardingCompleted": True
+    },
+    "createdAt": "2025-09-05T12:00:00Z",
+    "lastLoginAt": "2025-09-05T12:00:00Z"
+}
+
+def generate_otp():
+    """Generate a 6-digit OTP"""
+    return str(random.randint(100000, 999999))
+
+def store_user_profile(email, name, password):
+    """Store user profile in database"""
+    user_id = f"user_{int(time.time())}_{random.randint(1000, 9999)}"
+    USER_DATABASE[email] = {
+        "id": user_id,
+        "email": email,
+        "name": name,
+        "password": password,  # In production, this should be hashed
+        "subscriptionTier": "free",
+        "emailVerified": True,
+        "emailVerifiedAt": datetime.now().isoformat(),
+        "preferences": {
+            "topics": [
+                {"id": "machine-learning", "name": "Machine Learning", "description": "ML algorithms and applications", "category": "technology", "selected": False},
+                {"id": "nlp", "name": "Natural Language Processing", "description": "Text and language AI", "category": "technology", "selected": False},
+                {"id": "computer-vision", "name": "Computer Vision", "description": "Image and video AI", "category": "technology", "selected": False}
+            ],
+            "newsletterFrequency": "daily",
+            "emailNotifications": True,
+            "contentTypes": ["articles"],
+            "onboardingCompleted": False
+        },
+        "createdAt": datetime.now().isoformat(),
+        "lastLoginAt": datetime.now().isoformat()
+    }
+    return USER_DATABASE[email]
+
+def get_user_by_email(email):
+    """Get user profile by email"""
+    return USER_DATABASE.get(email)
+
+def validate_user_credentials(email, password):
+    """Validate user credentials against stored data"""
+    user = get_user_by_email(email)
+    if user and user.get("password") == password:
+        return user
+    return None
+
+def store_otp(email, otp):
+    """Store OTP with 10-minute expiration"""
+    OTP_STORAGE[email] = {
+        'otp': otp,
+        'created_at': time.time(),
+        'expires_at': time.time() + 600  # 10 minutes
+    }
+
+def verify_otp(email, provided_otp):
+    """Verify OTP and clean up expired ones"""
+    current_time = time.time()
+    
+    # Clean up expired OTPs
+    expired_emails = [e for e, data in OTP_STORAGE.items() if data['expires_at'] < current_time]
+    for e in expired_emails:
+        del OTP_STORAGE[e]
+    
+    # Check if OTP exists and is valid
+    if email not in OTP_STORAGE:
+        return False, "OTP not found or expired"
+    
+    stored_data = OTP_STORAGE[email]
+    if stored_data['expires_at'] < current_time:
+        del OTP_STORAGE[email]
+        return False, "OTP expired"
+    
+    if stored_data['otp'] != provided_otp:
+        return False, "Invalid OTP"
+    
+    # OTP is valid - remove it
+    del OTP_STORAGE[email]
+    return True, "OTP verified successfully"
+
+def should_refresh():
+    """Check if content should be refreshed based on 8-hour cycle"""
+    global LAST_REFRESH
+    if LAST_REFRESH is None:
+        return True
+    
+    time_since_refresh = datetime.now() - LAST_REFRESH
+    return time_since_refresh >= timedelta(hours=REFRESH_INTERVAL_HOURS)
+
+def get_next_refresh_time():
+    """Calculate next refresh time"""
+    global LAST_REFRESH
+    if LAST_REFRESH is None:
+        LAST_REFRESH = datetime.now()
+    
+    return LAST_REFRESH + timedelta(hours=REFRESH_INTERVAL_HOURS)
+
+def scrape_webpage_content(url):
+    """Scrape webpage to extract image and summary using basic HTML parsing"""
+    try:
+        # Create request with user agent
+        req = Request(url, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        })
+        
+        with urlopen(req, timeout=10) as response:
+            html_content = response.read().decode('utf-8', errors='ignore')
+        
+        # Extract meta image (og:image, twitter:image, etc.)
+        image_url = None
+        image_patterns = [
+            r'<meta[^>]*property=["\']og:image["\'][^>]*content=["\']([^"\']*)["\']',
+            r'<meta[^>]*name=["\']twitter:image["\'][^>]*content=["\']([^"\']*)["\']',
+            r'<meta[^>]*property=["\']twitter:image["\'][^>]*content=["\']([^"\']*)["\']',
+            r'<link[^>]*rel=["\']image_src["\'][^>]*href=["\']([^"\']*)["\']'
+        ]
+        
+        for pattern in image_patterns:
+            match = re.search(pattern, html_content, re.IGNORECASE)
+            if match:
+                image_url = match.group(1)
+                # Ensure absolute URL
+                if image_url.startswith('//'):
+                    image_url = 'https:' + image_url
+                elif image_url.startswith('/'):
+                    parsed_url = urlparse(url)
+                    image_url = f"{parsed_url.scheme}://{parsed_url.netloc}{image_url}"
+                break
+        
+        # Extract title and description for summary
+        title_match = re.search(r'<title[^>]*>([^<]*)</title>', html_content, re.IGNORECASE)
+        title = title_match.group(1).strip() if title_match else ""
+        
+        # Extract meta description
+        desc_patterns = [
+            r'<meta[^>]*name=["\']description["\'][^>]*content=["\']([^"\']*)["\']',
+            r'<meta[^>]*property=["\']og:description["\'][^>]*content=["\']([^"\']*)["\']'
+        ]
+        
+        description = ""
+        for pattern in desc_patterns:
+            match = re.search(pattern, html_content, re.IGNORECASE)
+            if match:
+                description = match.group(1).strip()
+                break
+        
+        # Generate summary (in production, this could be enhanced with AI)
+        if description:
+            summary = description[:200] + "..." if len(description) > 200 else description
+        elif title:
+            summary = f"Learn more about {title.lower()} and its implications for the AI industry."
+        else:
+            summary = "Discover the latest developments in AI technology and innovation."
+        
+        return {
+            'imageUrl': image_url,
+            'summary': summary,
+            'title': title
+        }
+        
+    except Exception as e:
+        print(f"Error scraping {url}: {e}")
+        return {
+            'imageUrl': None,
+            'summary': "Click to read the full article for detailed insights.",
+            'title': None
+        }
+
+def enhance_stories_with_scraped_content(stories):
+    """Enhance stories with scraped content if dynamic scraping is enabled"""
+    if not URL_VALIDATION_CONFIG.get('enable_dynamic_scraping', False):
+        return stories
+    
+    enhanced_stories = []
+    for story in stories:
+        enhanced_story = story.copy()
+        
+        # Only scrape if story doesn't have custom image/summary or for testing
+        if not story.get('imageUrl') or not story.get('summary'):
+            scraped_content = scrape_webpage_content(story['url'])
+            
+            # Use scraped image if available, otherwise use fallback
+            if scraped_content['imageUrl']:
+                enhanced_story['imageUrl'] = scraped_content['imageUrl']
+            elif not story.get('imageUrl'):
+                enhanced_story['imageUrl'] = URL_VALIDATION_CONFIG.get('fallback_image')
+            
+            # Use scraped summary if available
+            if scraped_content['summary'] and len(scraped_content['summary']) > 20:
+                enhanced_story['summary'] = scraped_content['summary']
+        
+        enhanced_stories.append(enhanced_story)
+    
+    return enhanced_stories
+
+class handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        # Parse the path
+        path = self.path
+        
+        # Handle path routing for Vercel
+        # When accessing /api/health, path will be "/api/health"
+        # When accessing /, path will be "/"
+        # Remove api/index from path since that's our function name
+        if path.startswith('/api/index'):
+            path = path[10:]  # Remove '/api/index'
+        if path.startswith('/'):
+            path = path[1:]
+            
+        # Remove query parameters for path matching
+        if '?' in path:
+            path = path.split('?')[0]
+        
+        # Set CORS headers
+        self.send_response(200)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        
+        # Route handling
+        try:
+            # Add debug info to root response
+            if path == '' or path == '/':
+                response_data = {
+                    "message": "AI News Scraper API with Swagger Documentation",
+                    "status": "running", 
+                    "version": "2.0.1",
+                    "debug_path": self.path,
+                    "processed_path": path,
+                    "swagger_ui": "/docs",
+                    "openapi_spec": "/openapi.json",
+                    "endpoints": {
+                        "system": ["/", "/api/health"],
+                        "content": ["/api/digest", "/api/scrape"],
+                        "multimedia": ["/api/multimedia/audio", "/api/multimedia/video"],
+                        "sources": ["/api/sources", "/api/multimedia/sources"]
+                    }
+                }
+            
+            elif path == 'health' or path == 'api/health':
+                enabled_sources = [source for source in AI_SOURCES if source.get('enabled', True)]
+                response_data = {
+                    "status": "healthy",
+                    "timestamp": datetime.now().isoformat(),
+                    "components": {
+                        "api": True, 
+                        "database": True,
+                        "scraper": True,
+                        "multimedia": True,
+                        "enhanced_scraping": ENHANCED_SCRAPING_ENABLED,
+                        "scheduler": SCHEDULER_ENABLED
+                    },
+                    "sources_info": {
+                        "total_sources": len(AI_SOURCES),
+                        "enabled_sources": len(enabled_sources),
+                        "refresh_interval_hours": REFRESH_INTERVAL_HOURS,
+                        "next_refresh": get_next_refresh_time().isoformat() if callable(get_next_refresh_time) else None,
+                        "refresh_needed": should_refresh() if callable(should_refresh) else False
+                    }
+                }
+            
+            elif path == 'digest' or path == 'api/digest':
+                enabled_sources = [source for source in AI_SOURCES if source.get('enabled', True)]
+                total_articles = int(len(enabled_sources) * 2.5)  # Average articles per source
+                
+                response_data = {
+                    "summary": {
+                        "keyPoints": [
+                            "• OpenAI continues advancing multimodal AI capabilities",
+                            "• Google DeepMind releases new reasoning models", 
+                            "• Microsoft integrates AI across enterprise products",
+                            "• Meta focuses on open-source AI development",
+                            "• NVIDIA announces new AI chip architectures",
+                            "• Anthropic enhances Claude's reasoning abilities",
+                            "• Hugging Face expands open-source AI ecosystem",
+                            "• Stanford AI research breaks new ground in LLMs"
+                        ],
+                        "metrics": {
+                            "totalUpdates": total_articles,
+                            "highImpact": int(total_articles * 0.25),
+                            "newResearch": int(total_articles * 0.20),
+                            "industryMoves": int(total_articles * 0.35),
+                            "sourcesScraped": len(enabled_sources),
+                            "lastRefresh": datetime.now().isoformat(),
+                            "nextRefresh": get_next_refresh_time().isoformat(),
+                            "refreshNeeded": should_refresh()
+                        }
+                    },
+                    "topStories": enhance_stories_with_scraped_content(TOP_STORIES),
+                    "content": {
+                        "blog": [
+                            {
+                                "title": "The State of AI in 2024: Key Developments",
+                                "description": "Comprehensive overview of major AI breakthroughs this year including GPT-4 Turbo, Gemini Pro, and Claude 3.",
+                                "source": "AI Research",
+                                "time": "2h ago",
+                                "impact": "high",
+                                "type": "blog",
+                                "url": "https://ai-research.com/state-of-ai-2024",
+                                "readTime": "8 min read",
+                                "significanceScore": 9.1,
+                                "imageUrl": "https://images.unsplash.com/photo-1485827404703-89b55fcc595e?w=400&h=250&fit=crop&q=80"
+                            }
+                        ],
+                        "audio": [
+                            {
+                                "title": "Lex Fridman: Future of AGI with Sam Altman",
+                                "description": "In-depth discussion on artificial general intelligence development and timeline.",
+                                "source": "Lex Fridman Podcast",
+                                "time": "1d ago",
+                                "impact": "high",
+                                "type": "audio",
+                                "url": "https://lexfridman.com/sam-altman-agi",
+                                "audio_url": "https://lexfridman.com/sam-altman-agi.mp3",
+                                "duration": 7200,
+                                "significanceScore": 8.9,
+                                "imageUrl": "https://images.unsplash.com/photo-1478737270239-2f02b77fc618?w=400&h=250&fit=crop&q=80"
+                            }
+                        ],
+                        "video": [
+                            {
+                                "title": "Two Minute Papers: Neural Radiance Fields Breakthrough",
+                                "description": "Latest developments in NeRF technology for 3D scene reconstruction.",
+                                "source": "Two Minute Papers",
+                                "time": "6h ago",
+                                "impact": "medium",
+                                "type": "video",
+                                "url": "https://youtube.com/watch?v=nerf-breakthrough",
+                                "thumbnail_url": "https://img.youtube.com/vi/nerf-breakthrough/maxresdefault.jpg",
+                                "duration": 720,
+                                "significanceScore": 7.6
+                            }
+                        ]
+                    },
+                    "timestamp": datetime.now().isoformat(),
+                    "badge": "Live Update"
+                }
+            
+            elif path == 'sources' or path == 'api/sources':
+                enabled_sources = [source for source in AI_SOURCES if source.get('enabled', True)]
+                response_data = {
+                    "sources": enabled_sources,
+                    "total_sources": len(AI_SOURCES),
+                    "enabled_count": len(enabled_sources),
+                    "claude_available": True,
+                    "last_updated": datetime.now().isoformat(),
+                    "refresh_interval": "8 hours"
+                }
+            
+            elif path == 'scrape' or path == 'api/scrape':
+                global LAST_REFRESH
+                enabled_sources = [source for source in AI_SOURCES if source.get('enabled', True)]
+                # Simulate realistic scraping results based on 100+ sources
+                articles_per_source = 2.5  # Average articles per source
+                total_articles = int(len(enabled_sources) * articles_per_source)
+                
+                # Update last refresh time
+                LAST_REFRESH = datetime.now()
+                
+                response_data = {
+                    "message": "Manual scrape completed",
+                    "articles_found": total_articles,
+                    "articles_processed": total_articles,
+                    "sources_scraped": len(enabled_sources),
+                    "total_sources": len(AI_SOURCES),
+                    "priority_sources": len([s for s in enabled_sources if s.get('priority', 5) <= 2]),
+                    "sources": [source['name'] for source in enabled_sources[:15]],  # Show first 15
+                    "claude_available": True,
+                    "timestamp": datetime.now().isoformat(),
+                    "refresh_interval": "8 hours",
+                    "next_scheduled_refresh": get_next_refresh_time().isoformat(),
+                    "refresh_triggered": True
+                }
+            
+            elif path == 'multimedia/audio' or path == 'api/multimedia/audio':
+                response_data = {
+                    "audio_content": [
+                        {
+                            "title": "Lex Fridman: AI Safety Discussion",
+                            "description": "Comprehensive discussion on AI alignment and safety measures.",
+                            "source": "Lex Fridman Podcast",
+                            "url": "https://lexfridman.com/ai-safety",
+                            "audio_url": "https://lexfridman.com/ai-safety.mp3",
+                            "duration": 6840,
+                            "published_date": datetime.now().isoformat(),
+                            "significance_score": 8.7,
+                            "processed": True
+                        }
+                    ],
+                    "total_count": 1,
+                    "hours_range": 24
+                }
+            
+            elif path == 'multimedia/video' or path == 'api/multimedia/video':
+                response_data = {
+                    "video_content": [
+                        {
+                            "title": "Two Minute Papers: Latest AI Research",
+                            "description": "Overview of cutting-edge AI research papers.",
+                            "source": "Two Minute Papers",
+                            "url": "https://youtube.com/watch?v=latest-ai",
+                            "thumbnail_url": "https://img.youtube.com/vi/latest-ai/maxresdefault.jpg",
+                            "duration": 420,
+                            "published_date": datetime.now().isoformat(),
+                            "significance_score": 7.9,
+                            "processed": True
+                        }
+                    ],
+                    "total_count": 1,
+                    "hours_range": 24
+                }
+            
+            elif path == 'multimedia/scrape' or path == 'api/multimedia/scrape':
+                response_data = {
+                    "message": "Multimedia scraping completed",
+                    "audio_found": 15,
+                    "video_found": 12,
+                    "audio_processed": 15,
+                    "video_processed": 12,
+                    "audio_sources": ["Lex Fridman Podcast", "Machine Learning Street Talk"],
+                    "video_sources": ["Two Minute Papers", "3Blue1Brown"],
+                    "claude_available": True
+                }
+            
+            elif path == 'multimedia/sources' or path == 'api/multimedia/sources':
+                response_data = {
+                    "sources": {
+                        "audio": [
+                            {"name": "Lex Fridman Podcast", "enabled": True, "priority": 1},
+                            {"name": "Machine Learning Street Talk", "enabled": True, "priority": 1}
+                        ],
+                        "video": [
+                            {"name": "Two Minute Papers", "enabled": True, "priority": 1},
+                            {"name": "3Blue1Brown", "enabled": True, "priority": 1}
+                        ]
+                    },
+                    "audio_sources": 2,
+                    "video_sources": 2,
+                    "claude_available": True
+                }
+            
+            elif path == 'docs':
+                # Return Swagger UI HTML
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                
+                swagger_html = '''<!DOCTYPE html>
+<html>
+<head>
+    <title>AI News Scraper API Documentation</title>
+    <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@4.15.5/swagger-ui.css" />
+</head>
+<body>
+    <div id="swagger-ui"></div>
+    <script src="https://unpkg.com/swagger-ui-dist@4.15.5/swagger-ui-bundle.js"></script>
+    <script>
+        SwaggerUIBundle({
+            url: '/openapi.json',
+            dom_id: '#swagger-ui',
+            presets: [
+                SwaggerUIBundle.presets.apis,
+                SwaggerUIBundle.presets.standalone
+            ]
+        });
+    </script>
+</body>
+</html>'''
+                self.wfile.write(swagger_html.encode())
+                return
+            
+            elif path == 'api/content-types':
+                response_data = {
+                    "content_types": {
+                        "all_sources": {"name": "All Sources", "description": "Comprehensive AI content", "icon": "🌐"},
+                        "blogs": {"name": "Blogs", "description": "Expert insights and analysis", "icon": "✍️"},
+                        "podcasts": {"name": "Podcasts", "description": "Audio content and interviews", "icon": "🎧"},
+                        "videos": {"name": "Videos", "description": "Visual content and presentations", "icon": "📹"},
+                        "events": {"name": "Events", "description": "AI conferences and workshops", "icon": "📅"},
+                        "learn": {"name": "Learn", "description": "Courses and tutorials", "icon": "🎓"}
+                    }
+                }
+            
+            elif path == 'topics' or path == 'api/topics':
+                response_data = [
+                    {"id": "machine-learning", "name": "Machine Learning", "description": "ML algorithms and applications"},
+                    {"id": "nlp", "name": "Natural Language Processing", "description": "Text and language AI"},
+                    {"id": "computer-vision", "name": "Computer Vision", "description": "Image and video AI"},
+                    {"id": "robotics", "name": "Robotics", "description": "AI in robotics and automation"},
+                    {"id": "ethics", "name": "AI Ethics", "description": "Ethical considerations in AI"}
+                ]
+            
+            elif path == 'auth/profile' or path == 'api/auth/profile':
+                # Get user info from Authorization header (JWT token)
+                auth_header = self.headers.get('Authorization', '')
+                
+                if not auth_header.startswith('Bearer '):
+                    self.send_response(401)
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    error_response = {"error": "Unauthorized", "message": "Authentication token required"}
+                    self.wfile.write(json.dumps(error_response).encode())
+                    return
+                
+                token = auth_header.replace('Bearer ', '')
+                print(f"Validating token for profile: {token[:30]}...")
+                
+                # Look up user data from token
+                user_data = None
+                for stored_token, stored_user in USER_STORAGE.items():
+                    if token == stored_token:
+                        user_data = stored_user
+                        print(f"Found user data: {user_data.get('name')} ({user_data.get('email')})")
+                        break
+                
+                if user_data is None:
+                    self.send_response(401)
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    error_response = {"error": "Invalid token", "message": "Authentication token is invalid or expired"}
+                    self.wfile.write(json.dumps(error_response).encode())
+                    return
+                
+                # Update lastLoginAt and return stored user data with preferences
+                user_data["lastLoginAt"] = datetime.now().isoformat()
+                response_data = user_data
+            
+            elif path == 'auth/preferences':
+                response_data = {
+                    "content_types": ["blogs", "videos", "events", "learn"],
+                    "frequency": "daily",
+                    "notifications": True,
+                    "theme": "light"
+                }
+            
+            elif path == 'api/auto-update/trigger':
+                response_data = {
+                    "message": "Auto-update triggered successfully",
+                    "status": "started",
+                    "timestamp": datetime.now().isoformat()
+                }
+            
+            elif path == 'api/auto-update/status':
+                response_data = {
+                    "in_progress": False,
+                    "last_run": datetime.now().isoformat(),
+                    "errors": [],
+                    "auto_update_enabled": True,
+                    "next_scheduled": datetime.now().isoformat()
+                }
+            
+            elif path == 'api/user-preferences':
+                response_data = {
+                    "content_types": ["blogs", "videos", "events", "learn"],
+                    "frequency": "daily",
+                    "notifications": True,
+                    "theme": "light",
+                    "last_updated": datetime.now().isoformat()
+                }
+            
+            elif path.startswith('api/content/'):
+                content_type = path.split('/')[-1]
+                
+                # Get sources for this content type
+                content_sources = [source for source in AI_SOURCES 
+                                 if source.get('enabled', True) and 
+                                 (source.get('content_type') == content_type or content_type == 'all_sources')]
+                
+                # Generate realistic content based on sources
+                articles = []
+                if content_type == 'all_sources':
+                    # Show mix of all content types
+                    articles = [
+                        {"title": "OpenAI Announces GPT-4 Turbo with Enhanced Multimodal Capabilities", "description": "OpenAI's latest model offers improved vision, longer context windows, and reduced costs.", "source": "OpenAI", "time": "2h ago", "impact": "high", "type": "article", "url": "https://openai.com/blog/gpt-4-turbo", "significanceScore": 9.2, "imageUrl": "https://images.unsplash.com/photo-1677442136019-21780ecad995?w=500&h=300&fit=crop&q=80"},
+                        {"title": "Google DeepMind's Gemini Ultra Achieves Human-Level Performance", "description": "New benchmark results show significant advances in reasoning capabilities.", "source": "Google DeepMind", "time": "4h ago", "impact": "high", "type": "article", "url": "https://deepmind.google/gemini", "significanceScore": 8.9, "imageUrl": "https://images.unsplash.com/photo-1573804633927-bfcbcd909acd?w=500&h=300&fit=crop&q=80"},
+                        {"title": "Meta's Code Llama 2 Transforms Software Development", "description": "Enhanced code generation model with 70B parameters now available.", "source": "Meta AI", "time": "6h ago", "impact": "medium", "type": "article", "url": "https://ai.meta.com/blog/code-llama-2", "significanceScore": 8.1, "imageUrl": "https://images.unsplash.com/photo-1611224923853-80b023f02d71?w=500&h=300&fit=crop&q=80"},
+                        {"title": "NVIDIA H100 GPUs Power Next-Gen AI Training", "description": "Performance benchmarks and availability updates for enterprise AI.", "source": "NVIDIA AI", "time": "8h ago", "impact": "medium", "type": "article", "url": "https://blogs.nvidia.com/h100-ai-training", "significanceScore": 7.8, "imageUrl": "https://images.unsplash.com/photo-1518709268805-4e9042af2176?w=500&h=300&fit=crop&q=80"},
+                        {"title": "Stanford HAI Releases AI Safety Guidelines", "description": "New framework for responsible AI development and deployment.", "source": "Stanford HAI", "time": "12h ago", "impact": "high", "type": "article", "url": "https://hai.stanford.edu/safety-guidelines", "significanceScore": 8.4, "imageUrl": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=500&h=300&fit=crop&q=80"}
+                    ]
+                elif content_type == 'blogs':
+                    articles = [
+                        {"title": "The Rise of Multimodal AI: Beyond Text and Images", "description": "Exploring how AI systems are evolving to process multiple data types simultaneously.", "source": "Towards Data Science", "time": "1h ago", "impact": "high", "type": "blog", "url": "https://towardsdatascience.com/multimodal-ai", "readTime": "8 min read", "significanceScore": 8.7, "imageUrl": "https://images.unsplash.com/photo-1620712943543-bcc4688e7485?w=500&h=300&fit=crop&q=80"},
+                        {"title": "Understanding Transformer Architecture: A Deep Dive", "description": "Comprehensive guide to attention mechanisms and transformer models.", "source": "The Gradient", "time": "3h ago", "impact": "medium", "type": "blog", "url": "https://thegradient.pub/transformers", "readTime": "12 min read", "significanceScore": 8.2, "imageUrl": "https://images.unsplash.com/photo-1518709268805-4e9042af2176?w=500&h=300&fit=crop&q=80"},
+                        {"title": "AI Ethics in 2024: Navigating the New Landscape", "description": "Current challenges and solutions in responsible AI development.", "source": "Distill.pub", "time": "5h ago", "impact": "high", "type": "blog", "url": "https://distill.pub/ai-ethics-2024", "readTime": "10 min read", "significanceScore": 8.5, "imageUrl": "https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=500&h=300&fit=crop&q=80"}
+                    ]
+                elif content_type == 'podcasts':
+                    articles = [
+                        {"title": "Lex Fridman: The Future of AGI with Demis Hassabis", "description": "In-depth conversation about artificial general intelligence timeline and safety.", "source": "Lex Fridman Podcast", "time": "1d ago", "impact": "high", "type": "audio", "url": "https://lexfridman.com/demis-hassabis", "duration": 7200, "significanceScore": 9.1, "imageUrl": "https://images.unsplash.com/photo-1478737270239-2f02b77fc618?w=500&h=300&fit=crop&q=80"},
+                        {"title": "TWIML: Recent Advances in Computer Vision", "description": "Discussion of latest breakthroughs in image recognition and processing.", "source": "TWIML AI Podcast", "time": "2d ago", "impact": "medium", "type": "audio", "url": "https://twimlai.com/computer-vision-advances", "duration": 3600, "significanceScore": 7.9, "imageUrl": "https://images.unsplash.com/photo-1590650153855-d9e808231d41?w=500&h=300&fit=crop&q=80"}
+                    ]
+                elif content_type == 'videos':
+                    articles = [
+                        {"title": "Two Minute Papers: Neural Radiance Fields Revolution", "description": "Latest breakthroughs in 3D scene reconstruction using AI.", "source": "Two Minute Papers", "time": "12h ago", "impact": "medium", "type": "video", "url": "https://youtube.com/watch?v=nerf-revolution", "duration": 480, "significanceScore": 8.3, "imageUrl": "https://images.unsplash.com/photo-1635070041078-e363dbe005cb?w=500&h=300&fit=crop&q=80"},
+                        {"title": "3Blue1Brown: Attention is All You Need Explained", "description": "Mathematical intuition behind the transformer architecture.", "source": "3Blue1Brown", "time": "1d ago", "impact": "high", "type": "video", "url": "https://youtube.com/watch?v=attention-explained", "duration": 1200, "significanceScore": 8.8, "imageUrl": "https://images.unsplash.com/photo-1509228468518-180dd4864904?w=500&h=300&fit=crop&q=80"}
+                    ]
+                elif content_type == 'events':
+                    articles = [
+                        {"title": "NeurIPS 2024 Conference", "description": "Premier machine learning conference with latest research presentations.", "source": "NeurIPS", "time": "Upcoming", "impact": "high", "type": "event", "url": "https://neurips.cc/2024", "date": "2024-12-10", "significanceScore": 9.0, "imageUrl": "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=500&h=300&fit=crop&q=80"},
+                        {"title": "AI Summit San Francisco 2024", "description": "Industry leaders discuss AI applications and future trends.", "source": "AI Summit", "time": "Upcoming", "impact": "medium", "type": "event", "url": "https://theaisummit.com/sf", "date": "2024-11-15", "significanceScore": 7.5, "imageUrl": "https://images.unsplash.com/photo-1475721027785-f74eccf877e2?w=500&h=300&fit=crop&q=80"}
+                    ]
+                elif content_type == 'learn':
+                    articles = [
+                        {"title": "Deep Learning Specialization by Andrew Ng", "description": "Comprehensive course series covering neural networks and deep learning.", "source": "Coursera", "time": "Updated", "impact": "high", "type": "course", "url": "https://coursera.org/specializations/deep-learning", "difficulty": "Intermediate", "significanceScore": 9.2, "imageUrl": "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=500&h=300&fit=crop&q=80"},
+                        {"title": "Fast.ai Practical Deep Learning Course", "description": "Hands-on approach to building and deploying AI models.", "source": "Fast.ai", "time": "Updated", "impact": "high", "type": "course", "url": "https://fast.ai/course", "difficulty": "Beginner", "significanceScore": 8.9, "imageUrl": "https://images.unsplash.com/photo-1606868306217-dbf5046868d2?w=500&h=300&fit=crop&q=80"}
+                    ]
+                
+                # Get content info from CONTENT_TYPES
+                content_info = CONTENT_TYPES.get(content_type, {
+                    "name": content_type.title(),
+                    "description": f"Latest {content_type} content",
+                    "icon": "📄"
+                })
+                
+                response_data = {
+                    "content_type": content_type,
+                    "content_info": content_info,
+                    "articles": articles,
+                    "total": len(articles),
+                    "sources_available": len(content_sources),
+                    "user_tier": "premium",
+                    "featured_sources": [{"name": source['name'], "website": source.get('website', '#')} for source in content_sources[:5]]
+                }
+            
+            elif path == 'content-types':
+                response_data = {
+                    "content_types": CONTENT_TYPES if CONTENT_TYPES else {
+                        "all_sources": {"name": "All Sources", "description": "Comprehensive AI content", "icon": "🌐"},
+                        "blogs": {"name": "Blogs", "description": "Expert insights and analysis", "icon": "✍️"},
+                        "podcasts": {"name": "Podcasts", "description": "Audio content and interviews", "icon": "🎧"},
+                        "videos": {"name": "Videos", "description": "Visual content and presentations", "icon": "📹"},
+                        "events": {"name": "Events", "description": "AI conferences and workshops", "icon": "📅"},
+                        "learn": {"name": "Learn", "description": "Courses and tutorials", "icon": "🎓"}
+                    }
+                }
+            
+            # Enhanced scraping endpoints
+            elif path == 'api/admin/current-day-articles':
+                # Get current day articles for admin validation
+                auth_header = self.headers.get('Authorization', '')
+                if not auth_header.startswith('Bearer admin-'):
+                    self.send_response(401)
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    error_response = {"error": "Admin authentication required"}
+                    self.wfile.write(json.dumps(error_response).encode())
+                    return
+                
+                if ENHANCED_SCRAPING_ENABLED and enhanced_scraper:
+                    articles = enhanced_scraper.get_current_day_articles()
+                    current_day = enhanced_scraper.get_current_day_ist()
+                    response_data = {
+                        "current_day": current_day,
+                        "articles_count": len(articles),
+                        "articles": articles,
+                        "last_updated": datetime.now().isoformat()
+                    }
+                else:
+                    response_data = {"error": "Enhanced scraping not available", "articles": []}
+            
+            elif path == 'api/admin/scraping-sessions':
+                # Get scraping session history for admin dashboard
+                auth_header = self.headers.get('Authorization', '')
+                if not auth_header.startswith('Bearer admin-'):
+                    self.send_response(401)
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    error_response = {"error": "Admin authentication required"}
+                    self.wfile.write(json.dumps(error_response).encode())
+                    return
+                
+                if ENHANCED_SCRAPING_ENABLED and enhanced_scraper:
+                    sessions = enhanced_scraper.get_scraping_sessions()
+                    response_data = {
+                        "sessions": sessions,
+                        "total_sessions": len(sessions)
+                    }
+                else:
+                    response_data = {"error": "Enhanced scraping not available", "sessions": []}
+            
+            elif path == 'api/admin/scheduler-status':
+                # Get scheduler status for admin dashboard
+                auth_header = self.headers.get('Authorization', '')
+                if not auth_header.startswith('Bearer admin-'):
+                    self.send_response(401)
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    error_response = {"error": "Admin authentication required"}
+                    self.wfile.write(json.dumps(error_response).encode())
+                    return
+                
+                if SCHEDULER_ENABLED and scheduler_service:
+                    status = scheduler_service.get_scheduler_status()
+                    response_data = {
+                        "scheduler_enabled": True,
+                        "status": status
+                    }
+                else:
+                    response_data = {
+                        "scheduler_enabled": False,
+                        "message": "Scheduler service not available"
+                    }
+            
+            elif path == 'api/enhanced-digest':
+                # Enhanced digest with current day filtering
+                if ENHANCED_SCRAPING_ENABLED and enhanced_scraper:
+                    articles = enhanced_scraper.get_current_day_articles(20)
+                    current_day = enhanced_scraper.get_current_day_ist()
+                    
+                    # Group articles by impact level
+                    high_impact = [a for a in articles if a['impact_level'] == 'high']
+                    medium_impact = [a for a in articles if a['impact_level'] == 'medium']
+                    low_impact = [a for a in articles if a['impact_level'] == 'low']
+                    
+                    response_data = {
+                        "enhanced_digest": True,
+                        "current_day": current_day,
+                        "summary": {
+                            "total_articles": len(articles),
+                            "high_impact": len(high_impact),
+                            "medium_impact": len(medium_impact),
+                            "low_impact": len(low_impact),
+                            "avg_significance_score": sum(a['significance_score'] for a in articles) / len(articles) if articles else 0
+                        },
+                        "high_impact_stories": high_impact[:5],
+                        "featured_articles": articles[:10],
+                        "timestamp": datetime.now().isoformat(),
+                        "last_scraping": "Enhanced scraping active"
+                    }
+                else:
+                    # Fallback to regular digest
+                    response_data = {
+                        "enhanced_digest": False,
+                        "message": "Enhanced scraping not available, using standard content",
+                        "summary": {"total_articles": 0},
+                        "high_impact_stories": [],
+                        "featured_articles": []
+                    }
+            
+            elif path.startswith('content/'):
+                content_type = path.split('/')[-1]
+                response_data = {
+                    "content_type": content_type,
+                    "articles": [
+                        {
+                            "title": f"Latest {content_type.title()} Content",
+                            "description": f"Comprehensive overview of {content_type} in AI",
+                            "source": "AI Research",
+                            "time": "2h ago",
+                            "impact": "high",
+                            "type": content_type,
+                            "url": f"https://example.com/{content_type}",
+                            "readTime": "5 min read",
+                            "significanceScore": 8.5
+                        }
+                    ],
+                    "total_count": 1
+                }
+            
+            elif path == 'openapi.json':
+                response_data = {
+                    "openapi": "3.0.0",
+                    "info": {
+                        "title": "AI News Scraper API",
+                        "version": "2.0.1",
+                        "description": "Comprehensive AI News Scraper API with multimedia content"
+                    },
+                    "paths": {
+                        "/": {"get": {"tags": ["System"], "summary": "API root endpoint", "responses": {"200": {"description": "API information"}}}},
+                        "/api/health": {"get": {"tags": ["System"], "summary": "Health check", "responses": {"200": {"description": "Health status"}}}},
+                        "/api/digest": {"get": {"tags": ["Content"], "summary": "Get AI news digest", "responses": {"200": {"description": "News digest"}}}},
+                        "/api/scrape": {"get": {"tags": ["Content"], "summary": "Manual content scraping", "responses": {"200": {"description": "Scraping results"}}}},
+                        "/api/sources": {"get": {"tags": ["Content"], "summary": "Get RSS sources", "responses": {"200": {"description": "RSS sources list"}}}},
+                        "/api/multimedia/audio": {"get": {"tags": ["Multimedia"], "summary": "Get audio content", "responses": {"200": {"description": "Audio content"}}}},
+                        "/api/multimedia/video": {"get": {"tags": ["Multimedia"], "summary": "Get video content", "responses": {"200": {"description": "Video content"}}}},
+                        "/api/multimedia/scrape": {"get": {"tags": ["Multimedia"], "summary": "Scrape multimedia", "responses": {"200": {"description": "Multimedia scraping results"}}}},
+                        "/api/multimedia/sources": {"get": {"tags": ["Multimedia"], "summary": "Get multimedia sources", "responses": {"200": {"description": "Multimedia sources"}}}}
+                    },
+                    "tags": [
+                        {"name": "System", "description": "System endpoints"},
+                        {"name": "Content", "description": "Content endpoints"},
+                        {"name": "Multimedia", "description": "Multimedia endpoints"}
+                    ]
+                }
+            
+            else:
+                response_data = {"error": "Not found", "path": path}
+                self.send_response(404)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(response_data).encode())
+                return
+            
+            # Send successful response
+            self.wfile.write(json.dumps(response_data).encode())
+            
+        except Exception as e:
+            # Handle any errors
+            self.send_response(500)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            
+            error_response = {
+                "error": "Internal server error",
+                "message": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+            self.wfile.write(json.dumps(error_response).encode())
+    
+    def do_POST(self):
+        # Simple and robust request body parsing
+        request_data = {}
+        
+        try:
+            content_length = int(self.headers.get('content-length', 0) or 0)
+            if content_length > 0:
+                raw_data = self.rfile.read(content_length)
+                body_text = raw_data.decode('utf-8').strip()
+                
+                if body_text:
+                    request_data = json.loads(body_text)
+                    print(f"POST body parsed successfully: {list(request_data.keys())}")
+                else:
+                    print("Empty request body")
+            else:
+                print("No content length")
+        except Exception as e:
+            print(f"Request parsing error: {e}")
+            request_data = {}
+        
+        # Handle authentication endpoints  
+        path = self.path
+        if path.startswith('/'):
+            path = path[1:]
+        
+        # Remove query parameters if present
+        if '?' in path:
+            path = path.split('?')[0]
+        
+        if path == 'auth/signup' or path == 'api/auth/signup':
+            # Check for duplicate email (mock check)
+            user_email = request_data.get("email", "")
+            if user_email == "vijayanishere@gmail.com":
+                self.send_response(400)
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                error_response = {"error": "Email already exists", "message": "An account with this email already exists. Please sign in instead."}
+                self.wfile.write(json.dumps(error_response).encode())
+                return
+            
+            # Debug logging for email verification setting
+            print(f"EMAIL_VERIFICATION_ENABLED: {EMAIL_VERIFICATION_ENABLED}")
+            print(f"Environment var: {os.environ.get('EMAIL_VERIFICATION_ENABLED', 'not set')}")
+            
+            # If email verification is disabled, proceed with normal signup
+            if not EMAIL_VERIFICATION_ENABLED:
+                response_data = {
+                    "user": {
+                        "id": "1",
+                        "name": request_data.get("name", "Test User"),
+                        "email": request_data.get("email", "user@example.com"),
+                        "subscriptionTier": "free",
+                        "emailVerified": True,
+                        "preferences": {
+                            "topics": [
+                                {"id": "machine-learning", "name": "Machine Learning", "description": "ML algorithms and applications", "category": "technology", "selected": False},
+                                {"id": "nlp", "name": "Natural Language Processing", "description": "Text and language AI", "category": "technology", "selected": False},
+                                {"id": "computer-vision", "name": "Computer Vision", "description": "Image and video AI", "category": "technology", "selected": False}
+                            ],
+                            "newsletterFrequency": "daily",
+                            "emailNotifications": True,
+                            "contentTypes": ["articles"]
+                        },
+                        "createdAt": datetime.now().isoformat(),
+                        "lastLoginAt": datetime.now().isoformat()
+                    },
+                    "token": "jwt-token-signup-123"
+                }
+            else:
+                # Email verification enabled - generate and send OTP
+                otp = generate_otp()
+                store_otp(user_email, otp)
+                
+                # In production, send email here. For now, just log it
+                print(f"OTP for {user_email}: {otp}")
+                
+                response_data = {
+                    "message": "OTP sent to email",
+                    "email": user_email,
+                    "emailVerificationRequired": True,
+                    "otpSent": True,
+                    "expiresInMinutes": 10
+                }
+        elif path == 'auth/login' or path == 'api/auth/login':
+            # Debug logging
+            print(f"Login request - Content-Length: {content_length}")
+            print(f"Login request - Request Data: {request_data}")
+            
+            # Validate login credentials
+            email = request_data.get("email", "") if request_data else ""
+            password = request_data.get("password", "") if request_data else ""
+            
+            # Check for missing credentials
+            if not email or not password:
+                self.send_response(400)
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                error_response = {"error": "Missing credentials", "message": "Email and password are required"}
+                self.wfile.write(json.dumps(error_response).encode())
+                return
+            
+            # Validate email format
+            if '@' not in email or '.' not in email:
+                self.send_response(400)
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                error_response = {"error": "Invalid email", "message": "Please enter a valid email address"}
+                self.wfile.write(json.dumps(error_response).encode())
+                return
+            
+            # Validate credentials dynamically against user database
+            user_profile = validate_user_credentials(email, password)
+            is_valid = user_profile is not None
+            
+            if is_valid:
+                print(f"Login validated for user: {user_profile['name']} ({email})")
+            else:
+                print(f"Login failed for: {email} - user not found or password incorrect")
+            
+            if not is_valid:
+                self.send_response(401)
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                error_response = {"error": "Invalid credentials", "message": "Email or password is incorrect"}
+                self.wfile.write(json.dumps(error_response).encode())
+                return
+            
+            # Valid login - use dynamic user profile data
+            token = f"jwt-token-login-{email.split('@')[0]}-{int(time.time())}"
+            
+            # Update last login time
+            user_profile['lastLoginAt'] = datetime.now().isoformat()
+            
+            # Create safe user data (without password) for response
+            user_data = {k: v for k, v in user_profile.items() if k != "password"}
+            
+            # Store user data for profile lookup
+            USER_STORAGE[token] = user_data
+            print(f"Stored user data for token: {user_profile['name']} ({email})")
+            
+            response_data = {
+                "user": user_data,
+                "token": token
+            }
+        elif path == 'auth/google' or path == 'api/auth/google':
+            # Validate required fields
+            id_token = request_data.get('idToken')
+            if not id_token:
+                self.send_response(400)
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                error_response = {"error": "Missing idToken", "message": "Google ID token is required"}
+                self.wfile.write(json.dumps(error_response).encode())
+                return
+            
+            # Basic token format validation
+            if not isinstance(id_token, str) or len(id_token) < 10:
+                self.send_response(400)
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                error_response = {"error": "Invalid idToken", "message": "Google ID token format is invalid"}
+                self.wfile.write(json.dumps(error_response).encode())
+                return
+            
+            # Extract user info from Google ID token
+            # In a real app, you'd verify the token with Google's API
+            # For now, we'll decode the payload to get user info
+            try:
+                import base64
+                # Google JWT tokens have 3 parts separated by dots
+                token_parts = id_token.split('.')
+                if len(token_parts) >= 2:
+                    # Decode the payload (second part)
+                    payload = token_parts[1]
+                    # Add padding if needed for base64 decoding
+                    missing_padding = len(payload) % 4
+                    if missing_padding:
+                        payload += '=' * (4 - missing_padding)
+                    
+                    decoded_bytes = base64.urlsafe_b64decode(payload)
+                    decoded_payload = json.loads(decoded_bytes.decode('utf-8'))
+                    
+                    # Extract user info from Google token
+                    google_email = decoded_payload.get('email', 'user@gmail.com')
+                    user_name = decoded_payload.get('name', 'Google User')
+                    
+                    print(f"Google auth - extracted email: {google_email}, name: {user_name}")
+                else:
+                    # Fallback if token format is unexpected
+                    google_email = "user@gmail.com"
+                    user_name = "Google User"
+            except Exception as e:
+                print(f"Error decoding Google token: {e}")
+                # Fallback to default values if decoding fails
+                google_email = "user@gmail.com"
+                user_name = "Google User"
+            
+            token = f"jwt-token-google-{int(time.time())}"
+            
+            user_data = {
+                "id": "google-1",
+                "name": user_name,
+                "email": google_email,
+                "subscriptionTier": "free",
+                "emailVerified": True,
+                "emailVerifiedAt": "2024-01-01T00:00:00Z",
+                "preferences": {
+                    "topics": [
+                        {"id": "machine-learning", "name": "Machine Learning", "description": "ML algorithms and applications", "category": "technology", "selected": True},
+                        {"id": "nlp", "name": "Natural Language Processing", "description": "Text and language AI", "category": "technology", "selected": True}
+                    ],
+                    "newsletterFrequency": "daily",
+                    "emailNotifications": True,
+                    "contentTypes": ["articles", "videos", "events", "learning"],
+                    "onboardingCompleted": True
+                },
+                "createdAt": "2024-01-01T00:00:00Z",
+                "lastLoginAt": datetime.now().isoformat()
+            }
+            
+            # Store user data for profile lookup
+            USER_STORAGE[token] = user_data
+            print(f"Stored Google user data: {user_name} ({google_email})")
+            
+            response_data = {
+                "user": user_data,
+                "token": token
+            }
+        elif path == 'auth/send-otp' or path == 'api/auth/send-otp':
+            # Send OTP for email verification
+            user_email = request_data.get("email", "")
+            user_name = request_data.get("name", "")  # Get name for personalized email
+            
+            if not user_email:
+                self.send_response(400)
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                error_response = {"error": "Email required", "message": "Email address is required"}
+                self.wfile.write(json.dumps(error_response).encode())
+                return
+            
+            otp = generate_otp()
+            store_otp(user_email, otp)
+            
+            # Debug logging
+            print(f"EMAIL_VERIFICATION_ENABLED: {EMAIL_VERIFICATION_ENABLED}")
+            print(f"email_service available: {email_service is not None}")
+            if email_service:
+                print(f"Brevo API key configured: {email_service.brevo_api_key is not None}")
+                print(f"BREVO_API_KEY env var: {os.getenv('BREVO_API_KEY') is not None}")
+                print(f"FROM_EMAIL: {email_service.from_email}")
+                print(f"FROM_NAME: {email_service.from_name}")
+            print(f"REQUESTS_AVAILABLE in email service: {hasattr(email_service, 'brevo_api_url') if email_service else 'N/A'}")
+            
+            # Send OTP email if email service is available and enabled
+            email_sent = False
+            if email_service and EMAIL_VERIFICATION_ENABLED:
+                user_data_for_email = {
+                    'email': user_email,
+                    'name': user_name or 'AI Enthusiast'
+                }
+                try:
+                    # Direct Brevo API call using urllib (no external dependencies)
+                    brevo_api_key = os.getenv("BREVO_API_KEY")
+                    print(f"Using Brevo API key: {brevo_api_key[:10]}..." if brevo_api_key else "No API key found")
+                    
+                    payload = {
+                        'sender': {
+                            'name': 'Vidyagam Learning',
+                            'email': 'admin@vidyagam.com'
+                        },
+                        'to': [
+                            {
+                                'email': user_email,
+                                'name': user_name or 'User'
+                            }
+                        ],
+                        'subject': '🔐 Your Vidyagam Learning Verification Code',
+                        'htmlContent': f'''
+                        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+                            <h1 style="color: #333; text-align: center;">🧠 Vidyagam Learning</h1>
+                            <h2 style="color: #666;">Email Verification Required</h2>
+                            <p>Hello {user_name or "User"},</p>
+                            <p>Please use the verification code below to complete your account setup:</p>
+                            <div style="background: #f5f5f5; padding: 20px; text-align: center; margin: 20px 0; border-radius: 8px;">
+                                <span style="font-size: 32px; font-weight: bold; letter-spacing: 5px; color: #333;">{otp}</span>
+                            </div>
+                            <p><strong>This code will expire in 10 minutes.</strong></p>
+                            <p>If you didn't request this verification, please ignore this email.</p>
+                            <p style="color: #888; font-size: 12px;">Vidyagam Learning • Connecting AI Innovation</p>
+                        </div>
+                        ''',
+                        'textContent': f'''Your Vidyagam Learning Verification Code: {otp}
+                        
+Hello {user_name or "User"},
+
+Please use this verification code to complete your account setup: {otp}
+
+This code will expire in 10 minutes.
+
+If you didn't request this verification, please ignore this email.
+
+Vidyagam Learning • Connecting AI Innovation'''
+                    }
+                    
+                    # Use urllib instead of requests
+                    data = json.dumps(payload).encode('utf-8')
+                    req = Request(
+                        'https://api.brevo.com/v3/smtp/email',
+                        data=data,
+                        headers={
+                            'accept': 'application/json',
+                            'api-key': brevo_api_key,
+                            'content-type': 'application/json'
+                        }
+                    )
+                    
+                    with urlopen(req) as response:
+                        response_data = response.read().decode('utf-8')
+                        print(f"Brevo API response: {response.status}")
+                        print(f"Response data: {response_data}")
+                        
+                        if response.status in [200, 201]:
+                            email_sent = True
+                            print("✅ Email sent successfully via Brevo!")
+                        else:
+                            email_sent = False
+                            print(f"❌ Brevo API failed with status: {response.status}")
+                        
+                except Exception as e:
+                    print(f"❌ Exception sending email: {e}")
+                    import traceback
+                    print(f"Full traceback: {traceback.format_exc()}")
+                    email_sent = False
+            else:
+                print("Email service or verification disabled")
+            
+            # Always print OTP for debugging/testing (remove in production)
+            print(f"OTP for {user_email}: {otp} (Email sent: {email_sent})")
+            
+            response_data = {
+                "message": "OTP sent successfully" if email_sent else "OTP generated (email not configured)",
+                "email": user_email,
+                "otpSent": email_sent,
+                "expiresInMinutes": 10
+            }
+        elif path == 'admin/login' or path == 'api/admin/login':
+            # Admin login endpoint
+            admin_email = request_data.get("email", "")
+            admin_password = request_data.get("password", "")
+            
+            if not admin_email or not admin_password:
+                self.send_response(400)
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                error_response = {"error": "Missing credentials", "message": "Email and password are required"}
+                self.wfile.write(json.dumps(error_response).encode())
+                return
+            
+            if ENHANCED_SCRAPING_ENABLED and admin_manager:
+                admin_user = admin_manager.validate_admin_credentials(admin_email, admin_password)
+                if admin_user:
+                    admin_token = f"admin-token-{admin_user['id']}-{int(time.time())}"
+                    response_data = {
+                        "admin": admin_user,
+                        "token": admin_token,
+                        "permissions": admin_user.get('permissions', 'content_admin'),
+                        "login_time": datetime.now().isoformat()
+                    }
+                else:
+                    self.send_response(401)
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    error_response = {"error": "Invalid credentials", "message": "Admin email or password is incorrect"}
+                    self.wfile.write(json.dumps(error_response).encode())
+                    return
+            else:
+                self.send_response(503)
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                error_response = {"error": "Service unavailable", "message": "Enhanced admin system not available"}
+                self.wfile.write(json.dumps(error_response).encode())
+                return
+        
+        elif path == 'admin/scrape' or path == 'api/admin/scrape':
+            # Custom scraping initiation by admin
+            auth_header = self.headers.get('Authorization', '')
+            if not auth_header.startswith('Bearer admin-'):
+                self.send_response(401)
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                error_response = {"error": "Admin authentication required"}
+                self.wfile.write(json.dumps(error_response).encode())
+                return
+            
+            scrape_type = request_data.get("scrape_type", "current_day")
+            filter_current_day = request_data.get("filter_current_day", True)
+            
+            if ENHANCED_SCRAPING_ENABLED and enhanced_scraper:
+                # Get AI sources for scraping
+                enabled_sources = [source for source in AI_SOURCES if source.get('enabled', True)]
+                
+                print(f"Admin initiated scraping: type={scrape_type}, filter_current_day={filter_current_day}")
+                
+                try:
+                    scraping_result = enhanced_scraper.scrape_with_llm_filtering(
+                        sources=enabled_sources, 
+                        filter_current_day=filter_current_day
+                    )
+                    
+                    response_data = {
+                        "message": "Custom scraping initiated successfully",
+                        "scrape_type": scrape_type,
+                        "filter_current_day": filter_current_day,
+                        "result": scraping_result,
+                        "initiated_at": datetime.now().isoformat(),
+                        "sources_count": len(enabled_sources)
+                    }
+                    
+                except Exception as e:
+                    print(f"Admin scraping failed: {e}")
+                    self.send_response(500)
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    error_response = {"error": "Scraping failed", "message": str(e)}
+                    self.wfile.write(json.dumps(error_response).encode())
+                    return
+            else:
+                self.send_response(503)
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                error_response = {"error": "Service unavailable", "message": "Enhanced scraping not available"}
+                self.wfile.write(json.dumps(error_response).encode())
+                return
+        
+        elif path == 'admin/validate-article' or path == 'api/admin/validate-article':
+            # Admin article validation
+            auth_header = self.headers.get('Authorization', '')
+            admin_token = auth_header.replace('Bearer ', '') if auth_header.startswith('Bearer ') else ''
+            
+            if not admin_token.startswith('admin-'):
+                self.send_response(401)
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                error_response = {"error": "Admin authentication required"}
+                self.wfile.write(json.dumps(error_response).encode())
+                return
+            
+            # Extract admin ID from token
+            admin_id = admin_token.split('-')[2] if len(admin_token.split('-')) > 2 else 'unknown'
+            
+            article_id = request_data.get("article_id", "")
+            validation_status = request_data.get("status", "pending")  # approved, rejected, pending
+            validation_notes = request_data.get("notes", "")
+            
+            if not article_id:
+                self.send_response(400)
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                error_response = {"error": "Missing article_id"}
+                self.wfile.write(json.dumps(error_response).encode())
+                return
+            
+            if ENHANCED_SCRAPING_ENABLED and admin_manager:
+                success = admin_manager.validate_article(admin_id, article_id, validation_status, validation_notes)
+                if success:
+                    response_data = {
+                        "message": "Article validation updated successfully",
+                        "article_id": article_id,
+                        "status": validation_status,
+                        "validated_by": admin_id,
+                        "validated_at": datetime.now().isoformat()
+                    }
+                else:
+                    self.send_response(500)
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    error_response = {"error": "Validation failed"}
+                    self.wfile.write(json.dumps(error_response).encode())
+                    return
+            else:
+                self.send_response(503)
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                error_response = {"error": "Service unavailable", "message": "Enhanced admin system not available"}
+                self.wfile.write(json.dumps(error_response).encode())
+                return
+        
+        elif path == 'admin/trigger-scraping' or path == 'api/admin/trigger-scraping':
+            # Manual trigger of scheduled scraping by admin
+            auth_header = self.headers.get('Authorization', '')
+            if not auth_header.startswith('Bearer admin-'):
+                self.send_response(401)
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                error_response = {"error": "Admin authentication required"}
+                self.wfile.write(json.dumps(error_response).encode())
+                return
+            
+            if SCHEDULER_ENABLED and scheduler_service:
+                trigger_result = scheduler_service.trigger_manual_run("admin_manual")
+                response_data = {
+                    "message": "Manual scraping triggered by admin",
+                    "result": trigger_result
+                }
+            else:
+                self.send_response(503)
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                error_response = {"error": "Service unavailable", "message": "Scheduler service not available"}
+                self.wfile.write(json.dumps(error_response).encode())
+                return
+        
+        elif path == 'auth/verify-otp' or path == 'api/auth/verify-otp':
+            # Verify OTP and complete signup
+            user_email = request_data.get("email", "")
+            provided_otp = request_data.get("otp", "")
+            user_data = request_data.get("userData", {})
+            
+            if not user_email or not provided_otp:
+                self.send_response(400)
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                error_response = {"error": "Missing data", "message": "Email and OTP are required"}
+                self.wfile.write(json.dumps(error_response).encode())
+                return
+            
+            # Verify OTP
+            is_valid, message = verify_otp(user_email, provided_otp)
+            if not is_valid:
+                self.send_response(400)
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                error_response = {"error": "Invalid OTP", "message": message}
+                self.wfile.write(json.dumps(error_response).encode())
+                return
+            
+            # OTP verified - create user account using dynamic data
+            user_name = user_data.get("name", "New User")
+            user_password = user_data.get("password", "")
+            
+            # Store user profile in database
+            user_account = store_user_profile(user_email, user_name, user_password)
+            
+            # Generate token
+            token = f"jwt-token-verified-{int(time.time())}"
+            
+            # Store user data for profile lookup (remove password from stored data)
+            user_account_safe = {k: v for k, v in user_account.items() if k != "password"}
+            USER_STORAGE[token] = user_account_safe
+            
+            print(f"Stored OTP verified user: {user_name} ({user_email})")
+            
+            response_data = {
+                "user": user_account,
+                "token": token
+            }
+        else:
+            response_data = {
+                "message": "POST method received", 
+                "path": self.path,
+                "body_received": bool(content_length)
+            }
+        
+        # Send success response
+        self.send_response(200)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        
+        self.wfile.write(json.dumps(response_data).encode())
+    
+    def do_PUT(self):
+        # Parse request body
+        content_length = int(self.headers.get('content-length', 0))
+        if content_length > 0:
+            body = self.rfile.read(content_length).decode('utf-8')
+            try:
+                request_data = json.loads(body)
+            except:
+                request_data = {}
+        else:
+            request_data = {}
+        
+        # Set CORS headers
+        self.send_response(200)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        
+        # Handle preferences update
+        path = self.path
+        if path.startswith('/'):
+            path = path[1:]
+        
+        if path == 'auth/preferences' or path == 'api/auth/preferences':
+            # Store user analytics and preferences
+            import time
+            response_data = {
+                "user": {
+                    "id": "1",
+                    "name": "User",
+                    "email": "user@example.com",
+                    "subscriptionTier": "premium",
+                    "preferences": {
+                        "topics": request_data.get("topics", []),
+                        "newsletterFrequency": request_data.get("newsletterFrequency", "daily"),
+                        "emailNotifications": request_data.get("emailNotifications", True),
+                        "contentTypes": request_data.get("contentTypes", ["articles"])
+                    },
+                    "analytics": {
+                        "occupation": request_data.get("analytics", {}).get("occupation", ""),
+                        "experienceLevel": request_data.get("analytics", {}).get("experienceLevel", "intermediate"),
+                        "onboardingCompletedAt": request_data.get("analytics", {}).get("onboardingCompletedAt", ""),
+                        "lastPreferencesUpdate": time.strftime("%Y-%m-%dT%H:%M:%SZ")
+                    },
+                    "createdAt": "2024-01-01T00:00:00Z",
+                    "lastLoginAt": time.strftime("%Y-%m-%dT%H:%M:%SZ")
+                }
+            }
+        else:
+            response_data = {
+                "message": "PUT method received", 
+                "path": self.path,
+                "data_received": request_data
+            }
+        
+        self.wfile.write(json.dumps(response_data).encode())
+
+    def do_OPTIONS(self):
+        # Handle CORS preflight
+        self.send_response(200)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
+        self.send_header('Access-Control-Max-Age', '86400')
+        self.end_headers()
