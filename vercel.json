@@ -23,9 +23,5 @@
       "src": "/(.*)",
       "dest": "/api/index.py"
     }
-  ],
-  "env": {
-    "ADMIN_API_KEY": "@admin_api_key",
-    "ANTHROPIC_API_KEY": "@anthropic_api_key"
-  }
+  ]
 }
