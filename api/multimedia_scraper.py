@@ -711,7 +711,7 @@ class MultimediaContentProcessor:
             Duration: {content.get('duration', 'Unknown')} seconds
             
             Provide:
-            1. A 2-3 sentence summary focusing on AI/ML topics
+            1. A concise 5-sentence summary focusing on AI/ML topics
             2. A significance score from 1-10 for AI community
             
             Format:
@@ -785,7 +785,7 @@ class MultimediaContentProcessor:
             Channel: {content['source']}
             
             Provide:
-            1. A 2-3 sentence summary focusing on AI/ML educational value
+            1. A concise 5-sentence summary focusing on AI/ML educational value
             2. A significance score from 1-10 for AI learning
             
             Format:

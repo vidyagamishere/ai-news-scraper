@@ -631,7 +631,7 @@ class ContentProcessor:
             Content: {article['content'][:1500]}
             
             Provide:
-            1. A 2-3 sentence summary
+            1. A concise 5-sentence summary
             2. A significance score from 1-10
             
             Format:

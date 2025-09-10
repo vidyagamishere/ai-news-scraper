@@ -398,7 +398,7 @@ class handler(BaseHTTPRequestHandler):
                 
                 # Create top stories from highest scored articles
                 top_stories = []
-                for article in articles[:10]:
+                for article in articles[:5]:
                     top_stories.append({
                         'title': article['title'],
                         'source': article['source'],
