@@ -66,6 +66,20 @@ except ImportError as e:
     auth_service = None
     AUTH_AVAILABLE = False
 
+# Import archive service
+try:
+    from archive_service import ArchiveService
+    
+    # Initialize archive service with configurable parameters
+    archive_db_path = os.getenv('ARCHIVE_DB_PATH', '/tmp/ai_news_archive.db')
+    archive_service = ArchiveService(archive_db_path)
+    ARCHIVE_AVAILABLE = True
+    print(f"✅ Archive service initialized - Retention: {archive_service.retention_days} days, Scraping: {archive_service.scraping_days} days")
+except ImportError as e:
+    print(f"Archive service not available: {e}")
+    archive_service = None
+    ARCHIVE_AVAILABLE = False
+
 # Simple Enhanced Scraper - Inline Implementation
 import pytz
 import hashlib
@@ -91,11 +105,20 @@ class SimpleEnhancedScraper:
             except Exception as e:
                 print(f"Claude API initialization failed: {e}")
     
-    def scrape_sources(self, sources=None, priority_only=False, content_type=None):
-        """Scrape articles from configured sources"""
+    def scrape_sources(self, sources=None, priority_only=False, content_type=None, days_filter=None):
+        """Scrape articles from configured sources with configurable date filtering"""
         try:
             if sources is None:
                 sources = AI_SOURCES
+            
+            # Get configurable scraping days
+            if days_filter is None:
+                scraping_days = int(os.getenv('CONTENT_SCRAPING_DAYS', '7'))
+            else:
+                scraping_days = days_filter
+                
+            # Calculate date cutoff for filtering
+            cutoff_date = datetime.now() - timedelta(days=scraping_days)
             
             # Filter sources based on parameters
             if priority_only:
@@ -115,7 +138,7 @@ class SimpleEnhancedScraper:
             
             for source in enabled_sources[:20]:  # Limit to 20 sources for performance
                 try:
-                    source_articles = self.scrape_single_source(source)
+                    source_articles = self.scrape_single_source(source, cutoff_date)
                     articles.extend(source_articles)
                     processed_sources.append(source['name'])
                     
@@ -148,8 +171,8 @@ class SimpleEnhancedScraper:
                 'timestamp': datetime.now().isoformat()
             }
     
-    def scrape_single_source(self, source):
-        """Scrape a single RSS source"""
+    def scrape_single_source(self, source, cutoff_date=None):
+        """Scrape a single RSS source with optional date filtering"""
         articles = []
         
         try:
@@ -162,7 +185,8 @@ class SimpleEnhancedScraper:
                     'url': source.get('website', ''),
                     'time': '1h ago',
                     'significanceScore': 7.5,
-                    'type': source.get('content_type', 'blog')
+                    'type': source.get('content_type', 'blog'),
+                    'published_date': datetime.now().isoformat()
                 }]
             
             # Parse RSS feed
@@ -186,8 +210,26 @@ class SimpleEnhancedScraper:
                     # Calculate significance score
                     significance = self.calculate_significance(title, description)
                     
-                    # Get published date
+                    # Get and parse published date
                     pub_date = getattr(entry, 'published', '')
+                    published_datetime = None
+                    
+                    if pub_date:
+                        try:
+                            # Try different date formats
+                            if 'T' in pub_date:
+                                published_datetime = datetime.fromisoformat(pub_date.replace('Z', '+00:00'))
+                            else:
+                                from email.utils import parsedate_to_datetime
+                                published_datetime = parsedate_to_datetime(pub_date)
+                        except:
+                            published_datetime = None
+                    
+                    # Apply date filtering if cutoff_date is provided
+                    if cutoff_date and published_datetime:
+                        if published_datetime.replace(tzinfo=None) < cutoff_date:
+                            continue  # Skip articles older than cutoff
+                    
                     time_str = self.format_time_ago(pub_date) if pub_date else 'Recently'
                     
                     article = {
@@ -199,7 +241,8 @@ class SimpleEnhancedScraper:
                         'significanceScore': significance,
                         'type': source.get('content_type', 'blog'),
                         'priority': source.get('priority', 3),
-                        'category': source.get('category', 'general')
+                        'category': source.get('category', 'general'),
+                        'published_date': published_datetime.isoformat() if published_datetime else datetime.now().isoformat()
                     }
                     
                     articles.append(article)
@@ -381,11 +424,13 @@ class handler(BaseHTTPRequestHandler):
                     self.send_response(500)
             
             elif path == '/api/digest':
-                # Enhanced digest with real scraping
+                # Enhanced digest with real scraping and archival
                 refresh = query_params.get('refresh', ['false'])[0].lower() == 'true'
+                days_filter = query_params.get('days', [None])[0]
+                days_filter = int(days_filter) if days_filter and days_filter.isdigit() else None
                 
                 scraper = SimpleEnhancedScraper()
-                scraping_result = scraper.scrape_sources(priority_only=True)  # Focus on free sources
+                scraping_result = scraper.scrape_sources(priority_only=True, days_filter=days_filter)  # Focus on free sources
                 
                 articles = scraping_result['articles']
                 
@@ -434,7 +479,9 @@ class handler(BaseHTTPRequestHandler):
                             'industryMoves': len([a for a in articles if 'announces' in a.get('title', '').lower()]),
                             'sourcesScraped': len(scraping_result['sources_processed']),
                             'validationEnabled': VALIDATION_AVAILABLE,
-                            'sourcesUpdated': SOURCES_UPDATED
+                            'sourcesUpdated': SOURCES_UPDATED,
+                            'archiveEnabled': ARCHIVE_AVAILABLE,
+                            'scrapingDays': int(os.getenv('CONTENT_SCRAPING_DAYS', '7'))
                         }
                     },
                     'content': content_by_type,
@@ -443,8 +490,16 @@ class handler(BaseHTTPRequestHandler):
                     'badge': f"Free Sources: {len(scraping_result['sources_processed'])} active",
                     'enhanced': ENHANCED_DEPS_AVAILABLE,
                     'admin_features': VALIDATION_AVAILABLE,
+                    'archive_features': ARCHIVE_AVAILABLE,
                     'scraping_errors': scraping_result.get('errors', [])[:5]  # Show first 5 errors
                 }
+                
+                # Auto-archive the digest if archive service is available
+                if ARCHIVE_AVAILABLE and archive_service:
+                    try:
+                        archive_service.archive_daily_digest(response_data)
+                    except Exception as e:
+                        print(f"⚠️ Failed to archive digest: {e}")
             
             elif path.startswith('/api/content/'):
                 content_type = path.split('/')[-1]
@@ -507,6 +562,67 @@ class handler(BaseHTTPRequestHandler):
                         response_data = {'error': 'Admin panel not found', 'path': admin_html_path}
                 except Exception as e:
                     response_data = {'error': f'Failed to load admin panel: {str(e)}'}
+            
+            # Archive endpoints
+            elif path.startswith('/api/archive/') and ARCHIVE_AVAILABLE:
+                archive_endpoint = path.replace('/api/archive/', '')
+                
+                if archive_endpoint == 'digests':
+                    # Get archived digests
+                    days = query_params.get('days', [None])[0]
+                    days = int(days) if days and days.isdigit() else None
+                    
+                    archives = archive_service.get_archived_digests(days)
+                    response_data = {
+                        'archives': archives,
+                        'total': len(archives),
+                        'retention_days': archive_service.retention_days,
+                        'scraping_days': archive_service.scraping_days
+                    }
+                
+                elif archive_endpoint.startswith('digest/'):
+                    # Get specific digest by date (YYYY-MM-DD)
+                    date_str = archive_endpoint.replace('digest/', '')
+                    digest = archive_service.get_digest_by_date(date_str)
+                    
+                    if digest:
+                        response_data = digest
+                    else:
+                        response_data = {'error': f'No digest found for date {date_str}'}
+                        self.send_response(404)
+                
+                elif archive_endpoint == 'search':
+                    # Search archived articles
+                    query = query_params.get('q', [''])[0]
+                    days = query_params.get('days', ['30'])[0]
+                    content_type = query_params.get('type', [None])[0]
+                    
+                    days = int(days) if days.isdigit() else 30
+                    
+                    if query:
+                        results = archive_service.search_archived_articles(query, days, content_type)
+                        response_data = {
+                            'query': query,
+                            'results': results,
+                            'total': len(results),
+                            'days_searched': days,
+                            'content_type': content_type
+                        }
+                    else:
+                        response_data = {'error': 'Search query parameter "q" required'}
+                        self.send_response(400)
+                
+                elif archive_endpoint == 'stats':
+                    # Get archive statistics
+                    response_data = archive_service.get_archive_statistics()
+                
+                elif archive_endpoint == 'settings':
+                    # Get archive settings
+                    response_data = archive_service.get_settings()
+                
+                else:
+                    response_data = {'error': f'Unknown archive endpoint: {archive_endpoint}'}
+                    self.send_response(404)
             
             # Admin validation endpoints
             elif path.startswith('/api/admin/') and VALIDATION_AVAILABLE:
