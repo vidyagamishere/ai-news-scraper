@@ -27,10 +27,5 @@
   "env": {
     "ADMIN_API_KEY": "@admin_api_key",
     "ANTHROPIC_API_KEY": "@anthropic_api_key"
-  },
-  "functions": {
-    "api/index.py": {
-      "maxDuration": 30
-    }
   }
 }
