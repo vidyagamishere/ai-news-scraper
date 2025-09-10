@@ -49,6 +49,23 @@ except ImportError as e:
     print(f"Validation not available: {e}")
     VALIDATION_AVAILABLE = False
 
+# Import authentication modules
+try:
+    from auth_service import AuthService
+    from auth_models import UserCreate, UserLogin, GoogleAuthRequest
+    
+    # Initialize auth service
+    db_path = os.getenv('AUTH_DB_PATH', '/tmp/ai_news_auth.db')
+    jwt_secret = os.getenv('JWT_SECRET', 'your-jwt-secret-key-change-in-production')
+    google_client_id = os.getenv('GOOGLE_CLIENT_ID', '')
+    
+    auth_service = AuthService(db_path, jwt_secret, google_client_id)
+    AUTH_AVAILABLE = True
+except ImportError as e:
+    print(f"Authentication not available: {e}")
+    auth_service = None
+    AUTH_AVAILABLE = False
+
 # Simple Enhanced Scraper - Inline Implementation
 import pytz
 import hashlib
@@ -334,6 +351,35 @@ class handler(BaseHTTPRequestHandler):
                     count = len([s for s in AI_SOURCES if s.get('content_type') == content_type])
                     response_data['sources_by_type'][content_type] = count
             
+            # Authentication endpoints
+            elif path == '/api/auth/profile' and AUTH_AVAILABLE:
+                # Get user profile from token
+                auth_header = self.headers.get('Authorization', '')
+                if auth_header.startswith('Bearer '):
+                    token = auth_header[7:]
+                    try:
+                        user = auth_service.get_user_by_token(token)
+                        if user:
+                            response_data = user.model_dump()
+                        else:
+                            self.send_error(401, 'Invalid or expired token')
+                            return
+                    except Exception as e:
+                        self.send_error(401, f'Token validation failed: {str(e)}')
+                        return
+                else:
+                    self.send_error(401, 'Authorization header required')
+                    return
+            
+            elif path == '/api/topics' and AUTH_AVAILABLE:
+                # Get available AI topics
+                try:
+                    topics = auth_service.get_available_topics()
+                    response_data = [topic.model_dump() for topic in topics]
+                except Exception as e:
+                    response_data = {'error': f'Failed to get topics: {str(e)}'}
+                    self.send_response(500)
+            
             elif path == '/api/digest':
                 # Enhanced digest with real scraping
                 refresh = query_params.get('refresh', ['false'])[0].lower() == 'true'
@@ -560,8 +606,119 @@ class handler(BaseHTTPRequestHandler):
             except json.JSONDecodeError:
                 request_data = {}
             
+            # Authentication endpoints
+            if path == '/api/auth/login' and AUTH_AVAILABLE:
+                try:
+                    email = request_data.get('email', '')
+                    password = request_data.get('password', '')
+                    
+                    if not email or not password:
+                        response_data = {'error': 'Email and password are required'}
+                        self.send_response(400)
+                    else:
+                        login_data = UserLogin(email=email, password=password)
+                        user = auth_service.authenticate_user(login_data)
+                        if user:
+                            response_data = auth_service.generate_auth_response(user)
+                        else:
+                            response_data = {'error': 'Invalid email or password'}
+                            self.send_response(401)
+                except Exception as e:
+                    response_data = {'error': f'Login failed: {str(e)}'}
+                    self.send_response(500)
+            
+            elif path == '/api/auth/signup' and AUTH_AVAILABLE:
+                try:
+                    email = request_data.get('email', '')
+                    password = request_data.get('password', '')
+                    name = request_data.get('name', '')
+                    
+                    if not email or not password or not name:
+                        response_data = {'error': 'Email, password, and name are required'}
+                        self.send_response(400)
+                    else:
+                        user_data = UserCreate(email=email, password=password, name=name)
+                        user = auth_service.create_user(user_data)
+                        response_data = auth_service.generate_auth_response(user)
+                except ValueError as e:
+                    response_data = {'error': str(e)}
+                    self.send_response(400)
+                except Exception as e:
+                    response_data = {'error': f'Signup failed: {str(e)}'}
+                    self.send_response(500)
+            
+            elif path == '/api/auth/google' and AUTH_AVAILABLE:
+                try:
+                    id_token = request_data.get('idToken', '')
+                    
+                    if not id_token:
+                        response_data = {'error': 'Google ID token is required'}
+                        self.send_response(400)
+                    else:
+                        user = auth_service.google_authenticate(id_token)
+                        if user:
+                            response_data = auth_service.generate_auth_response(user)
+                        else:
+                            response_data = {'error': 'Google authentication failed'}
+                            self.send_response(401)
+                except Exception as e:
+                    response_data = {'error': f'Google authentication failed: {str(e)}'}
+                    self.send_response(500)
+            
+            elif path == '/api/auth/preferences':
+                if not AUTH_AVAILABLE:
+                    response_data = {'error': 'Authentication not available'}
+                    self.send_response(500)
+                else:
+                    # Update user preferences (handled in both POST and PUT)
+                    auth_header = self.headers.get('Authorization', '')
+                    if auth_header.startswith('Bearer '):
+                        token = auth_header[7:]
+                        try:
+                            user = auth_service.get_user_by_token(token)
+                            if user:
+                                updated_user = auth_service.update_user_preferences(user.id, request_data)
+                                if updated_user:
+                                    response_data = updated_user.model_dump()
+                                else:
+                                    response_data = {'error': 'Failed to update preferences'}
+                                    self.send_response(500)
+                            else:
+                                response_data = {'error': 'Invalid or expired token'}
+                                self.send_response(401)
+                        except Exception as e:
+                            response_data = {'error': f'Failed to update preferences: {str(e)}'}
+                            self.send_response(500)
+                    else:
+                        response_data = {'error': 'Authorization header required'}
+                        self.send_response(401)
+            
+            elif path == '/api/subscription/upgrade' and AUTH_AVAILABLE:
+                # Upgrade subscription
+                auth_header = self.headers.get('Authorization', '')
+                if auth_header.startswith('Bearer '):
+                    token = auth_header[7:]
+                    try:
+                        user = auth_service.get_user_by_token(token)
+                        if user:
+                            updated_user = auth_service.upgrade_user_subscription(user.id)
+                            if updated_user:
+                                response_data = updated_user.model_dump()
+                            else:
+                                response_data = {'error': 'Failed to upgrade subscription'}
+                                self.send_response(500)
+                        else:
+                            response_data = {'error': 'Invalid or expired token'}
+                            self.send_response(401)
+                    except Exception as e:
+                        response_data = {'error': f'Failed to upgrade subscription: {str(e)}'}
+                        self.send_response(500)
+                else:
+                    response_data = {'error': 'Authorization header required'}
+                    self.send_response(401)
+            
             # Admin authentication check
-            if path.startswith('/api/admin/'):
+            elif path.startswith('/api/admin/'):
                 admin_key = self.headers.get('X-Admin-Key')
                 expected_key = os.getenv('ADMIN_API_KEY', 'your-secure-admin-key-here')
                 
@@ -679,12 +836,17 @@ class handler(BaseHTTPRequestHandler):
             error_response = json.dumps({'error': f'JSON encoding failed: {str(e)}'})
             self.wfile.write(error_response.encode())
     
+    def do_PUT(self):
+        # Handle PUT requests (same as POST for API endpoints)
+        self.do_POST()
+    
     def do_OPTIONS(self):
         # Handle CORS preflight requests
         self.send_response(200)
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type, X-Admin-Key')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, X-Admin-Key, Authorization')
+        self.send_header('Access-Control-Max-Age', '86400')
         self.end_headers()
 
 # Export the handler for Vercel
