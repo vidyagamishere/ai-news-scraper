@@ -272,7 +272,7 @@ class handler(BaseHTTPRequestHandler):
             if path == '/' or path == '/api':
                 response_data = {
                     'status': 'AI News Scraper API with Admin Validation',
-                    'version': '2.0.0',
+                    'version': '3.0.0',
                     'features': [
                         'Enhanced RSS scraping',
                         'Free AI sources (45+ sources)',
