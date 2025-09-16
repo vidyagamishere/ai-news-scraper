@@ -33,8 +33,7 @@ RUN apt-get update && apt-get install -y \
 COPY --from=builder /root/.local /home/appuser/.local
 
 # Copy application code
-COPY main.py .
-COPY multimedia_scraper.py .
+COPY api/ ./api/
 COPY .env.production .env
 
 # Create data directory for SQLite database
@@ -48,10 +47,10 @@ ENV PATH=/home/appuser/.local/bin:$PATH
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/api/health || exit 1
+    CMD curl -f http://localhost:$PORT/health || exit 1
 
 # Expose port
-EXPOSE 8000
+EXPOSE $PORT
 
-# Run the application
-CMD ["python", "main.py"]
+# Run the application with uvicorn
+CMD ["uvicorn", "api.index:app", "--host", "0.0.0.0", "--port", "$PORT"]
