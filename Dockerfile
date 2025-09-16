@@ -32,9 +32,10 @@ RUN apt-get update && apt-get install -y \
 # Copy Python packages from builder stage
 COPY --from=builder /root/.local /home/appuser/.local
 
-# Copy application code
+# Copy application code and requirements (Railway needs this in runtime)
 COPY api/ ./api/
 COPY health_check.py .
+COPY requirements.txt .
 COPY .env.production .env
 
 # Create data directory for SQLite database
