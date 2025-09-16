@@ -57,13 +57,10 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=10s --retries=3 \
 # Run the application with uvicorn
 CMD sh -c "echo '=== RAILWAY STARTUP DEBUG ===' && \
            echo 'PORT environment variable: $PORT' && \
-           echo 'Current working directory:' && pwd && \
-           echo 'Contents of /app:' && ls -la && \
-           echo 'Contents of /app/api:' && ls -la api/ && \
-           echo 'Python path:' && python -c 'import sys; print(sys.path)' && \
-           echo 'Testing FastAPI import:' && python -c 'import fastapi; print(\"FastAPI imported successfully\")' && \
+           echo 'File version check - first 20 lines of api/index.py:' && head -n 20 /app/api/index.py && \
+           echo 'Searching for FastAPI app creation:' && grep -n 'app = FastAPI' /app/api/index.py || echo 'FastAPI app creation not found!' && \
+           echo 'File size:' && wc -l /app/api/index.py && \
            echo 'Testing api.index module import:' && python -c 'import api.index; print(\"Module imported successfully\")' && \
            echo 'Checking module attributes:' && python -c 'import api.index; print(\"Module attributes:\", [attr for attr in dir(api.index) if not attr.startswith(\"_\")])' && \
-           echo 'Testing api.index.app access:' && python -c 'from api.index import app; print(\"App object imported successfully\", type(app))' && \
-           echo 'Starting uvicorn server...' && \
+           echo 'Looking for app in module:' && python -c 'import api.index; print(\"Has app attribute:\", hasattr(api.index, \"app\"))' && \
            uvicorn api.index:app --host 0.0.0.0 --port $PORT --log-level debug"
