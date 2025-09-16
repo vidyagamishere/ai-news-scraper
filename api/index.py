@@ -925,6 +925,7 @@ app.add_middleware(
         "https://vidyagam.com", 
         "https://ai-news-react.vercel.app",
         "https://ai-news-react-*.vercel.app",
+        "https://ai-news-react-ditdccite-vijayan-subramaniyans-projects-0c70c64d.vercel.app",
         "http://localhost:5173",
         "http://localhost:3000",
         "*"  # Allow all origins for debugging
@@ -940,13 +941,30 @@ app.add_middleware(
         "User-Agent",
         "DNT",
         "Cache-Control",
-        "X-Requested-With"
+        "X-Requested-With",
+        "Access-Control-Allow-Origin",
+        "Access-Control-Allow-Headers",
+        "Access-Control-Allow-Methods"
     ],
     expose_headers=["*"]
 )
 
 # Initialize router
 router = AINewsRouter()
+
+# Add explicit OPTIONS handler for CORS preflight
+@app.options("/{full_path:path}")
+async def options_handler(request: Request):
+    """Handle CORS preflight requests"""
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Admin-Key, Accept, Origin, User-Agent, DNT, Cache-Control, X-Requested-With",
+            "Access-Control-Max-Age": "86400"
+        }
+    )
 
 # Add request logging middleware
 @app.middleware("http")
