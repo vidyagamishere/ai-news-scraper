@@ -34,6 +34,7 @@ COPY --from=builder /root/.local /home/appuser/.local
 
 # Copy application code
 COPY api/ ./api/
+COPY health_check.py .
 COPY .env.production .env
 
 # Create data directory for SQLite database
@@ -49,8 +50,17 @@ ENV PATH=/home/appuser/.local/bin:$PATH
 EXPOSE 8000
 
 # Health check (Railway will set PORT env var)
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD sh -c 'curl -f http://localhost:$PORT/health || exit 1'
+HEALTHCHECK --interval=30s --timeout=30s --start-period=10s --retries=3 \
+    CMD python health_check.py
 
 # Run the application with uvicorn
-CMD sh -c "echo 'Starting FastAPI on port $PORT...' && uvicorn api.index:app --host 0.0.0.0 --port $PORT --log-level info"
+CMD sh -c "echo '=== RAILWAY STARTUP DEBUG ===' && \
+           echo 'PORT environment variable: $PORT' && \
+           echo 'Current working directory:' && pwd && \
+           echo 'Contents of /app:' && ls -la && \
+           echo 'Contents of /app/api:' && ls -la api/ && \
+           echo 'Python path:' && python -c 'import sys; print(sys.path)' && \
+           echo 'Testing FastAPI import:' && python -c 'import fastapi; print(\"FastAPI imported successfully\")' && \
+           echo 'Testing api.index import:' && python -c 'from api.index import app; print(\"App imported successfully\")' && \
+           echo 'Starting uvicorn server...' && \
+           uvicorn api.index:app --host 0.0.0.0 --port $PORT --log-level debug"
