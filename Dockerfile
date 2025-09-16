@@ -45,12 +45,12 @@ USER appuser
 # Make sure scripts in .local are usable
 ENV PATH=/home/appuser/.local/bin:$PATH
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:$PORT/health || exit 1
+# Expose port (Railway will set PORT env var)
+EXPOSE 8000
 
-# Expose port
-EXPOSE $PORT
+# Health check (Railway will set PORT env var)
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+    CMD sh -c 'curl -f http://localhost:$PORT/health || exit 1'
 
 # Run the application with uvicorn
-CMD ["uvicorn", "api.index:app", "--host", "0.0.0.0", "--port", "$PORT"]
+CMD sh -c "uvicorn api.index:app --host 0.0.0.0 --port $PORT"
