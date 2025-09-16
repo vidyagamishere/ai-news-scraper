@@ -62,6 +62,7 @@ CMD sh -c "echo '=== RAILWAY STARTUP DEBUG ===' && \
            echo 'Contents of /app/api:' && ls -la api/ && \
            echo 'Python path:' && python -c 'import sys; print(sys.path)' && \
            echo 'Testing FastAPI import:' && python -c 'import fastapi; print(\"FastAPI imported successfully\")' && \
-           echo 'Testing api.index import:' && python -c 'from api.index import app; print(\"App imported successfully\")' && \
+           echo 'Testing api.index module import:' && python -c 'import api.index; print(\"Module imported successfully\")' && \
+           echo 'Testing api.index.app access:' && python -c 'from api.index import app; print(\"App object imported successfully\", type(app))' && \
            echo 'Starting uvicorn server...' && \
            uvicorn api.index:app --host 0.0.0.0 --port $PORT --log-level debug"
