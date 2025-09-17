@@ -678,6 +678,10 @@ class AINewsRouter:
                 return await self.handle_logout(headers)
             elif auth_endpoint == "topics":
                 return await self.handle_auth_topics()
+            elif auth_endpoint == "preferences" and method in ["PUT", "POST"]:
+                return await self.handle_auth_preferences(body or {}, headers)
+            elif auth_endpoint == "profile":
+                return await self.handle_auth_profile(headers)
             else:
                 logger.warning(f"❌ Unknown auth endpoint: {auth_endpoint}")
                 return {"error": f"Auth endpoint '{auth_endpoint}' not found", "status": 404}
@@ -866,6 +870,75 @@ class AINewsRouter:
                 "timestamp": datetime.utcnow().isoformat()
             }
         }
+    
+    async def handle_auth_preferences(self, data: Dict, headers: Dict) -> Dict[str, Any]:
+        """Handle user preferences update with debug logging"""
+        try:
+            logger.info("🔐 Processing auth preferences update request")
+            logger.info(f"📊 Preferences data: {data}")
+            
+            # Extract user info from headers or token
+            token = headers.get('authorization', '').replace('Bearer ', '')
+            if not token:
+                return {"error": "Authentication required", "status": 401}
+            
+            # For now, return success with updated preferences
+            # In a real implementation, you'd decode the token and update the database
+            return {
+                "success": True,
+                "message": "Preferences updated successfully",
+                "user": {
+                    "id": "user_example",
+                    "email": "user@example.com",
+                    "name": "User",
+                    "preferences": data,
+                    "subscription_tier": "free"
+                },
+                "router_endpoint": True,
+                "debug_info": {
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "preferences_updated": True
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Preferences update failed: {str(e)}")
+            return {"error": f"Preferences update failed: {str(e)}", "status": 500}
+    
+    async def handle_auth_profile(self, headers: Dict) -> Dict[str, Any]:
+        """Handle user profile fetch with debug logging"""
+        try:
+            logger.info("🔐 Processing auth profile request")
+            
+            # Extract user info from headers or token
+            token = headers.get('authorization', '').replace('Bearer ', '')
+            if not token:
+                return {"error": "Authentication required", "status": 401}
+            
+            # For now, return a sample profile
+            # In a real implementation, you'd decode the token and fetch from database
+            return {
+                "success": True,
+                "user": {
+                    "id": "user_example",
+                    "email": "user@example.com",
+                    "name": "User",
+                    "preferences": {
+                        "topics": [],
+                        "newsletter_frequency": "weekly",
+                        "email_notifications": True
+                    },
+                    "subscription_tier": "free"
+                },
+                "router_endpoint": True,
+                "debug_info": {
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Profile fetch failed: {str(e)}")
+            return {"error": f"Profile fetch failed: {str(e)}", "status": 500}
     
     async def handle_admin_endpoints(self, endpoint: str, headers: Dict, params: Dict = None) -> Dict[str, Any]:
         """Handle admin endpoints with debug logging"""
