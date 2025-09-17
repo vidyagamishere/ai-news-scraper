@@ -217,7 +217,7 @@ class AINewsRouter:
                         topics TEXT,
                         newsletter_frequency TEXT DEFAULT 'weekly',
                         email_notifications BOOLEAN DEFAULT TRUE,
-                        content_types TEXT DEFAULT '["articles"]',
+                        content_types TEXT DEFAULT '["blogs", "podcasts", "videos"]',
                         onboarding_completed BOOLEAN DEFAULT FALSE,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -804,7 +804,7 @@ class AINewsRouter:
                 "topics": [],
                 "newsletter_frequency": "weekly", 
                 "email_notifications": True,
-                "content_types": ["articles"],
+                "content_types": ["blogs", "podcasts", "videos"],
                 "onboarding_completed": False
             }
             
@@ -813,7 +813,7 @@ class AINewsRouter:
                     "topics": json.loads(user_prefs['topics']) if user_prefs['topics'] else [],
                     "newsletter_frequency": user_prefs['newsletter_frequency'],
                     "email_notifications": bool(user_prefs['email_notifications']),
-                    "content_types": json.loads(user_prefs['content_types']) if user_prefs['content_types'] else ["articles"],
+                    "content_types": json.loads(user_prefs['content_types']) if user_prefs['content_types'] else ["blogs", "podcasts", "videos"],
                     "onboarding_completed": bool(user_prefs['onboarding_completed'])
                 })
             
@@ -920,19 +920,133 @@ class AINewsRouter:
         }
     
     async def handle_auth_topics(self) -> Dict[str, Any]:
-        """Get available topics for authentication/preferences with debug info"""
+        """Get available topics and content types for authentication/preferences from ai_sources_config"""
         logger.info("🔐 Processing auth topics request")
+        
+        # Content types from ai_sources_config_updated.py
+        content_types = [
+            {
+                "id": "blogs",
+                "name": "Blogs",
+                "description": "Expert insights, analysis, and thought leadership articles",
+                "icon": "✍️",
+                "enabled": True,
+                "default": True
+            },
+            {
+                "id": "podcasts", 
+                "name": "Podcasts",
+                "description": "Audio content, interviews, and discussions from AI leaders",
+                "icon": "🎧",
+                "enabled": True,
+                "default": True
+            },
+            {
+                "id": "videos",
+                "name": "Videos",
+                "description": "Visual content, presentations, and educational videos",
+                "icon": "📹",
+                "enabled": True,
+                "default": True
+            },
+            {
+                "id": "newsletters",
+                "name": "Newsletters",
+                "description": "Daily and weekly AI newsletters and digests",
+                "icon": "📬",
+                "enabled": True,
+                "default": False
+            },
+            {
+                "id": "events",
+                "name": "Events",
+                "description": "AI conferences, webinars, workshops, and networking events",
+                "icon": "📅",
+                "enabled": True,
+                "default": False
+            },
+            {
+                "id": "learn",
+                "name": "Learn",
+                "description": "Courses, tutorials, educational content, and skill development",
+                "icon": "🎓",
+                "enabled": True,
+                "default": False
+            }
+        ]
+        
+        # Topic categories based on our sources
+        topics = [
+            {
+                "id": "ai-research",
+                "name": "AI Research",
+                "description": "Latest AI research papers, findings, and breakthroughs",
+                "category": "research",
+                "sources": ["OpenAI Blog", "Anthropic Blog", "Google AI Blog", "Papers With Code"]
+            },
+            {
+                "id": "machine-learning",
+                "name": "Machine Learning",
+                "description": "ML techniques, algorithms, and practical applications",
+                "category": "technical",
+                "sources": ["Towards Data Science", "Distill.pub", "Fast.ai"]
+            },
+            {
+                "id": "industry-news",
+                "name": "Industry News",
+                "description": "AI industry updates, company news, and market trends",
+                "category": "business",
+                "sources": ["The Batch by DeepLearning.AI", "AI Breakfast", "The Rundown AI"]
+            },
+            {
+                "id": "deep-learning",
+                "name": "Deep Learning",
+                "description": "Neural networks, deep learning architectures and applications",
+                "category": "technical",
+                "sources": ["DeepLearning.AI YouTube", "3Blue1Brown", "Two Minute Papers"]
+            },
+            {
+                "id": "tools-frameworks",
+                "name": "AI Tools & Frameworks",
+                "description": "AI development tools, libraries, and frameworks",
+                "category": "tools",
+                "sources": ["Hugging Face Blog", "Papers With Code"]
+            },
+            {
+                "id": "ethics-safety",
+                "name": "AI Ethics & Safety",
+                "description": "AI safety, ethics, governance, and responsible AI development",
+                "category": "ethics",
+                "sources": ["Anthropic Blog", "Stanford HAI"]
+            },
+            {
+                "id": "podcasts-interviews",
+                "name": "Podcasts & Interviews",
+                "description": "Long-form conversations with AI researchers and practitioners",
+                "category": "media",
+                "sources": ["Lex Fridman Podcast", "Machine Learning Street Talk", "The AI Podcast"]
+            },
+            {
+                "id": "educational",
+                "name": "Educational Content",
+                "description": "Learning resources, courses, and tutorials",
+                "category": "education",
+                "sources": ["MIT OpenCourseWare", "Stanford AI Courses", "Coursera AI Courses"]
+            }
+        ]
+        
         return {
-            "topics": [
-                {"id": "ai-research", "name": "AI Research", "category": "research"},
-                {"id": "machine-learning", "name": "Machine Learning", "category": "technical"},
-                {"id": "industry-news", "name": "Industry News", "category": "business"},
-                {"id": "tools-frameworks", "name": "AI Tools & Frameworks", "category": "tools"},
-                {"id": "ethics-safety", "name": "AI Ethics & Safety", "category": "ethics"}
-            ],
+            "content_types": content_types,
+            "topics": topics,
+            "default_selections": {
+                "content_types": ["blogs", "podcasts", "videos"],
+                "topics": ["ai-research", "machine-learning", "industry-news"]
+            },
             "router_endpoint": True,
             "debug_info": {
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.utcnow().isoformat(),
+                "total_content_types": len(content_types),
+                "total_topics": len(topics)
             }
         }
     
@@ -970,7 +1084,7 @@ class AINewsRouter:
                         topics TEXT DEFAULT '[]',
                         newsletter_frequency TEXT DEFAULT 'weekly',
                         email_notifications BOOLEAN DEFAULT TRUE,
-                        content_types TEXT DEFAULT '["articles"]',
+                        content_types TEXT DEFAULT '["blogs", "podcasts", "videos"]',
                         onboarding_completed BOOLEAN DEFAULT FALSE,
                         newsletter_subscribed BOOLEAN DEFAULT FALSE,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -984,7 +1098,7 @@ class AINewsRouter:
                 
                 required_columns = {
                     'newsletter_subscribed': 'BOOLEAN DEFAULT FALSE',
-                    'content_types': 'TEXT DEFAULT \'["articles"]\'',
+                    'content_types': 'TEXT DEFAULT \'["blogs", "podcasts", "videos"]\'',
                     'created_at': 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
                     'updated_at': 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'
                 }
@@ -1029,7 +1143,7 @@ class AINewsRouter:
                     'topics': json.dumps(data.get('topics', [])),
                     'newsletter_frequency': data.get('newsletter_frequency', 'weekly'),
                     'email_notifications': bool(data.get('email_notifications', True)),
-                    'content_types': json.dumps(data.get('content_types', ['articles'])),
+                    'content_types': json.dumps(data.get('content_types', ['blogs', 'podcasts', 'videos'])),
                     'onboarding_completed': bool(data.get('onboarding_completed', False)),
                     'newsletter_subscribed': bool(data.get('newsletter_subscribed', False)),
                     'created_at': datetime.utcnow().isoformat(),
@@ -1125,7 +1239,7 @@ class AINewsRouter:
                 "topics": [],
                 "newsletter_frequency": "weekly",
                 "email_notifications": True,
-                "content_types": ["articles"],
+                "content_types": ["blogs", "podcasts", "videos"],
                 "onboarding_completed": False,
                 "newsletter_subscribed": False
             }
@@ -1135,7 +1249,7 @@ class AINewsRouter:
                     "topics": json.loads(user_prefs['topics']) if user_prefs['topics'] else [],
                     "newsletter_frequency": user_prefs['newsletter_frequency'],
                     "email_notifications": bool(user_prefs['email_notifications']),
-                    "content_types": json.loads(user_prefs['content_types']) if user_prefs['content_types'] else ["articles"],
+                    "content_types": json.loads(user_prefs['content_types']) if user_prefs['content_types'] else ["blogs", "podcasts", "videos"],
                     "onboarding_completed": bool(user_prefs['onboarding_completed']),
                     "newsletter_subscribed": bool(user_prefs['newsletter_subscribed'])
                 })
