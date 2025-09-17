@@ -196,6 +196,35 @@ class AINewsRouter:
                     )
                 """)
                 
+                # Create users table for persistent authentication
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS users (
+                        id TEXT PRIMARY KEY,
+                        email TEXT UNIQUE NOT NULL,
+                        name TEXT,
+                        picture TEXT,
+                        verified_email BOOLEAN DEFAULT TRUE,
+                        subscription_tier TEXT DEFAULT 'free',
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                
+                # Create user_preferences table for onboarding data
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS user_preferences (
+                        user_id TEXT PRIMARY KEY,
+                        topics TEXT,
+                        newsletter_frequency TEXT DEFAULT 'weekly',
+                        email_notifications BOOLEAN DEFAULT TRUE,
+                        content_types TEXT DEFAULT '["articles"]',
+                        onboarding_completed BOOLEAN DEFAULT FALSE,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (user_id) REFERENCES users (id)
+                    )
+                """)
+                
                 # Insert sample data for demo
                 sample_articles = [
                     ("AI Router Architecture Deployed Successfully", 
@@ -746,18 +775,49 @@ class AINewsRouter:
                     )
                 """)
             
+            # Check if user already exists
+            user_id = token_data.get('sub', '')
+            cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+            existing_user = cursor.fetchone()
+            is_existing_user = existing_user is not None
+            
+            logger.info(f"📊 User existence check: existing={is_existing_user}")
+            
             # Insert or update user
             cursor.execute("""
                 INSERT OR REPLACE INTO users (id, email, name, picture, verified_email, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?)
             """, (
-                token_data.get('sub', ''),
+                user_id,
                 token_data.get('email', ''),
                 token_data.get('name', ''),
                 token_data.get('picture', ''),
                 True,
                 datetime.utcnow().isoformat()
             ))
+            
+            # Check user preferences and onboarding status
+            cursor.execute("SELECT * FROM user_preferences WHERE user_id = ?", (user_id,))
+            user_prefs = cursor.fetchone()
+            
+            preferences = {
+                "topics": [],
+                "newsletter_frequency": "weekly", 
+                "email_notifications": True,
+                "content_types": ["articles"],
+                "onboarding_completed": False
+            }
+            
+            if user_prefs:
+                preferences.update({
+                    "topics": json.loads(user_prefs['topics']) if user_prefs['topics'] else [],
+                    "newsletter_frequency": user_prefs['newsletter_frequency'],
+                    "email_notifications": bool(user_prefs['email_notifications']),
+                    "content_types": json.loads(user_prefs['content_types']) if user_prefs['content_types'] else ["articles"],
+                    "onboarding_completed": bool(user_prefs['onboarding_completed'])
+                })
+            
+            logger.info(f"📊 User preferences loaded: onboarding_completed={preferences['onboarding_completed']}")
             
             conn.commit()
             conn.close()
@@ -774,14 +834,19 @@ class AINewsRouter:
                     "email": token_data.get('email', ''),
                     "name": token_data.get('name', ''),
                     "picture": token_data.get('picture', ''),
-                    "verified_email": True
+                    "verified_email": True,
+                    "subscription_tier": "free",
+                    "preferences": preferences
                 },
+                "isUserExist": is_existing_user,
                 "expires_in": 86400,
                 "router_auth": True,
                 "debug_info": {
                     "timestamp": datetime.utcnow().isoformat(),
                     "user_created_or_updated": True,
-                    "jwt_token_length": len(jwt_token)
+                    "jwt_token_length": len(jwt_token),
+                    "is_existing_user": is_existing_user,
+                    "preferences_loaded": bool(user_prefs)
                 }
             }
             
@@ -872,72 +937,210 @@ class AINewsRouter:
         }
     
     async def handle_auth_preferences(self, data: Dict, headers: Dict) -> Dict[str, Any]:
-        """Handle user preferences update with debug logging"""
+        """Handle user preferences update with JWT verification and database persistence"""
         try:
             logger.info("🔐 Processing auth preferences update request")
             logger.info(f"📊 Preferences data: {data}")
             
-            # Extract user info from headers or token
-            token = headers.get('authorization', '').replace('Bearer ', '')
+            # Extract and verify JWT token
+            token = headers.get('authorization', '')
             if not token:
                 return {"error": "Authentication required", "status": 401}
             
-            # For now, return success with updated preferences
-            # In a real implementation, you'd decode the token and update the database
+            # Verify JWT token
+            payload = self.auth_service.verify_jwt_token(token)
+            if not payload:
+                return {"error": "Invalid or expired token", "status": 401}
+            
+            user_id = payload.get('sub', '')
+            if not user_id:
+                return {"error": "Invalid token payload", "status": 401}
+            
+            # Update preferences in database
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+            
+            # Ensure user_preferences table exists
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='user_preferences'")
+            if not cursor.fetchone():
+                logger.info("📊 Creating user_preferences table")
+                cursor.execute("""
+                    CREATE TABLE user_preferences (
+                        user_id TEXT PRIMARY KEY,
+                        topics TEXT DEFAULT '[]',
+                        newsletter_frequency TEXT DEFAULT 'weekly',
+                        email_notifications BOOLEAN DEFAULT TRUE,
+                        content_types TEXT DEFAULT '["articles"]',
+                        onboarding_completed BOOLEAN DEFAULT FALSE,
+                        newsletter_subscribed BOOLEAN DEFAULT FALSE,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+            
+            # Get current preferences
+            cursor.execute("SELECT * FROM user_preferences WHERE user_id = ?", (user_id,))
+            current_prefs = cursor.fetchone()
+            
+            # Prepare update data
+            update_data = {}
+            if 'topics' in data:
+                update_data['topics'] = json.dumps(data['topics'])
+            if 'newsletter_frequency' in data:
+                update_data['newsletter_frequency'] = data['newsletter_frequency']
+            if 'email_notifications' in data:
+                update_data['email_notifications'] = bool(data['email_notifications'])
+            if 'content_types' in data:
+                update_data['content_types'] = json.dumps(data['content_types'])
+            if 'onboarding_completed' in data:
+                update_data['onboarding_completed'] = bool(data['onboarding_completed'])
+            if 'newsletter_subscribed' in data:
+                update_data['newsletter_subscribed'] = bool(data['newsletter_subscribed'])
+            
+            update_data['updated_at'] = datetime.utcnow().isoformat()
+            
+            if current_prefs:
+                # Update existing preferences
+                set_clause = ', '.join([f"{key} = ?" for key in update_data.keys()])
+                values = list(update_data.values()) + [user_id]
+                cursor.execute(f"UPDATE user_preferences SET {set_clause} WHERE user_id = ?", values)
+                logger.info(f"📊 Updated preferences for existing user: {user_id}")
+            else:
+                # Insert new preferences
+                all_fields = {
+                    'user_id': user_id,
+                    'topics': json.dumps(data.get('topics', [])),
+                    'newsletter_frequency': data.get('newsletter_frequency', 'weekly'),
+                    'email_notifications': bool(data.get('email_notifications', True)),
+                    'content_types': json.dumps(data.get('content_types', ['articles'])),
+                    'onboarding_completed': bool(data.get('onboarding_completed', False)),
+                    'newsletter_subscribed': bool(data.get('newsletter_subscribed', False)),
+                    'created_at': datetime.utcnow().isoformat(),
+                    'updated_at': datetime.utcnow().isoformat()
+                }
+                
+                placeholders = ', '.join(['?' for _ in all_fields])
+                fields = ', '.join(all_fields.keys())
+                cursor.execute(f"INSERT INTO user_preferences ({fields}) VALUES ({placeholders})", list(all_fields.values()))
+                logger.info(f"📊 Created new preferences for user: {user_id}")
+            
+            # Get updated preferences to return
+            cursor.execute("SELECT * FROM user_preferences WHERE user_id = ?", (user_id,))
+            updated_prefs = cursor.fetchone()
+            
+            # Get user data
+            cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+            user_data = cursor.fetchone()
+            
+            conn.commit()
+            conn.close()
+            
+            # Format response
+            preferences = {
+                "topics": json.loads(updated_prefs['topics']) if updated_prefs['topics'] else [],
+                "newsletter_frequency": updated_prefs['newsletter_frequency'],
+                "email_notifications": bool(updated_prefs['email_notifications']),
+                "content_types": json.loads(updated_prefs['content_types']) if updated_prefs['content_types'] else ["articles"],
+                "onboarding_completed": bool(updated_prefs['onboarding_completed']),
+                "newsletter_subscribed": bool(updated_prefs['newsletter_subscribed'])
+            }
+            
             return {
-                "success": True,
-                "message": "Preferences updated successfully",
-                "user": {
-                    "id": "user_example",
-                    "email": "user@example.com",
-                    "name": "User",
-                    "preferences": data,
-                    "subscription_tier": "free"
-                },
-                "router_endpoint": True,
+                "id": user_id,
+                "email": payload.get('email', ''),
+                "name": payload.get('name', ''),
+                "picture": payload.get('picture', ''),
+                "verified_email": True,
+                "subscription_tier": "free",
+                "preferences": preferences,
                 "debug_info": {
                     "timestamp": datetime.utcnow().isoformat(),
-                    "preferences_updated": True
+                    "preferences_updated": True,
+                    "user_id": user_id
                 }
             }
             
         except Exception as e:
             logger.error(f"❌ Preferences update failed: {str(e)}")
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
             return {"error": f"Preferences update failed: {str(e)}", "status": 500}
     
     async def handle_auth_profile(self, headers: Dict) -> Dict[str, Any]:
-        """Handle user profile fetch with debug logging"""
+        """Handle user profile fetch with JWT verification and database lookup"""
         try:
             logger.info("🔐 Processing auth profile request")
             
-            # Extract user info from headers or token
-            token = headers.get('authorization', '').replace('Bearer ', '')
+            # Extract and verify JWT token
+            token = headers.get('authorization', '')
             if not token:
                 return {"error": "Authentication required", "status": 401}
             
-            # For now, return a sample profile
-            # In a real implementation, you'd decode the token and fetch from database
+            # Verify JWT token
+            payload = self.auth_service.verify_jwt_token(token)
+            if not payload:
+                return {"error": "Invalid or expired token", "status": 401}
+            
+            user_id = payload.get('sub', '')
+            if not user_id:
+                return {"error": "Invalid token payload", "status": 401}
+            
+            # Fetch user data from database
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+            
+            # Get user data
+            cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+            user_data = cursor.fetchone()
+            
+            if not user_data:
+                logger.warning(f"❌ User not found in database: {user_id}")
+                conn.close()
+                return {"error": "User not found", "status": 404}
+            
+            # Get user preferences
+            cursor.execute("SELECT * FROM user_preferences WHERE user_id = ?", (user_id,))
+            user_prefs = cursor.fetchone()
+            
+            conn.close()
+            
+            # Format preferences
+            preferences = {
+                "topics": [],
+                "newsletter_frequency": "weekly",
+                "email_notifications": True,
+                "content_types": ["articles"],
+                "onboarding_completed": False,
+                "newsletter_subscribed": False
+            }
+            
+            if user_prefs:
+                preferences.update({
+                    "topics": json.loads(user_prefs['topics']) if user_prefs['topics'] else [],
+                    "newsletter_frequency": user_prefs['newsletter_frequency'],
+                    "email_notifications": bool(user_prefs['email_notifications']),
+                    "content_types": json.loads(user_prefs['content_types']) if user_prefs['content_types'] else ["articles"],
+                    "onboarding_completed": bool(user_prefs['onboarding_completed']),
+                    "newsletter_subscribed": bool(user_prefs['newsletter_subscribed'])
+                })
+            
             return {
-                "success": True,
-                "user": {
-                    "id": "user_example",
-                    "email": "user@example.com",
-                    "name": "User",
-                    "preferences": {
-                        "topics": [],
-                        "newsletter_frequency": "weekly",
-                        "email_notifications": True
-                    },
-                    "subscription_tier": "free"
-                },
-                "router_endpoint": True,
+                "id": user_data['id'],
+                "email": user_data['email'],
+                "name": user_data['name'],
+                "picture": user_data['picture'],
+                "verified_email": bool(user_data['verified_email']),
+                "subscription_tier": "free",
+                "preferences": preferences,
                 "debug_info": {
-                    "timestamp": datetime.utcnow().isoformat()
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "user_id": user_id,
+                    "preferences_found": bool(user_prefs)
                 }
             }
             
         except Exception as e:
             logger.error(f"❌ Profile fetch failed: {str(e)}")
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
             return {"error": f"Profile fetch failed: {str(e)}", "status": 500}
     
     async def handle_admin_endpoints(self, endpoint: str, headers: Dict, params: Dict = None) -> Dict[str, Any]:
