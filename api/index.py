@@ -960,7 +960,7 @@ class AINewsRouter:
             conn = self.get_db_connection()
             cursor = conn.cursor()
             
-            # Ensure user_preferences table exists
+            # Ensure user_preferences table exists with all columns
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='user_preferences'")
             if not cursor.fetchone():
                 logger.info("📊 Creating user_preferences table")
@@ -977,6 +977,23 @@ class AINewsRouter:
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
+            else:
+                # Check for missing columns and add them
+                cursor.execute("PRAGMA table_info(user_preferences)")
+                existing_columns = [row[1] for row in cursor.fetchall()]
+                
+                required_columns = {
+                    'newsletter_subscribed': 'BOOLEAN DEFAULT FALSE',
+                    'content_types': 'TEXT DEFAULT \'["articles"]\'',
+                    'created_at': 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
+                    'updated_at': 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'
+                }
+                
+                for column_name, column_def in required_columns.items():
+                    if column_name not in existing_columns:
+                        logger.info(f"📊 Adding missing column: {column_name}")
+                        cursor.execute(f"ALTER TABLE user_preferences ADD COLUMN {column_name} {column_def}")
+                        conn.commit()
             
             # Get current preferences
             cursor.execute("SELECT * FROM user_preferences WHERE user_id = ?", (user_id,))
