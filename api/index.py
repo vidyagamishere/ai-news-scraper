@@ -1510,21 +1510,37 @@ class AINewsRouter:
             
             # Send OTP email using existing Brevo service
             try:
-                # Import email service - try multiple paths
+                # Import email service with proper path handling
                 email_service = None
                 try:
+                    # Try direct import first
                     from lib.email_service import EmailDigestService
                     email_service = EmailDigestService()
-                except ImportError:
+                    logger.info("📧 EmailDigestService imported successfully")
+                except ImportError as e1:
+                    logger.warning(f"Direct import failed: {e1}")
                     try:
+                        # Try with sys.path manipulation
                         import sys
                         import os
-                        sys.path.append(os.path.join(os.path.dirname(__file__), 'lib'))
+                        api_dir = os.path.dirname(os.path.abspath(__file__))
+                        lib_path = os.path.join(api_dir, 'lib')
+                        if lib_path not in sys.path:
+                            sys.path.insert(0, lib_path)
                         from email_service import EmailDigestService
                         email_service = EmailDigestService()
-                    except ImportError:
-                        logger.warning("Could not import EmailDigestService")
-                        email_service = None
+                        logger.info("📧 EmailDigestService imported with path manipulation")
+                    except ImportError as e2:
+                        logger.warning(f"Path manipulation import failed: {e2}")
+                        try:
+                            # Try absolute import
+                            sys.path.insert(0, '/app/api/lib')
+                            from email_service import EmailDigestService  
+                            email_service = EmailDigestService()
+                            logger.info("📧 EmailDigestService imported with absolute path")
+                        except ImportError as e3:
+                            logger.warning(f"All import attempts failed: {e3}")
+                            email_service = None
                 
                 if email_service:
                     # Send OTP email with user data format
