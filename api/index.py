@@ -1589,6 +1589,13 @@ class AINewsRouter:
             conn = self.get_db_connection()
             cursor = conn.cursor()
             
+            # Ensure verified_email column exists
+            try:
+                cursor.execute("SELECT verified_email FROM users LIMIT 1")
+            except sqlite3.OperationalError:
+                logger.info("Adding verified_email column to users table in OTP verification")
+                cursor.execute("ALTER TABLE users ADD COLUMN verified_email BOOLEAN DEFAULT TRUE")
+            
             cursor.execute("""
                 SELECT otp, name, expires_at FROM email_otps 
                 WHERE email = ? AND expires_at > ?
