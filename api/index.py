@@ -1595,6 +1595,7 @@ class AINewsRouter:
             except sqlite3.OperationalError:
                 logger.info("Adding verified_email column to users table in OTP verification")
                 cursor.execute("ALTER TABLE users ADD COLUMN verified_email BOOLEAN DEFAULT TRUE")
+                conn.commit()
             
             cursor.execute("""
                 SELECT otp, name, expires_at FROM email_otps 
