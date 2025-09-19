@@ -875,73 +875,67 @@ class AINewsRouter:
             logger.info(f"📊 User existence check: existing={is_existing_user}")
             
             # Insert or update user
-            # Check if users table exists and create if needed with correct schema
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS users (
-                    id TEXT PRIMARY KEY,
-                    email TEXT UNIQUE NOT NULL,
-                    name TEXT,
-                    picture TEXT,
-                    verified_email BOOLEAN DEFAULT TRUE,
-                    subscription_tier TEXT DEFAULT 'free',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
+            # First check what columns exist in the users table
+            cursor.execute("PRAGMA table_info(users)")
+            existing_columns = [column[1] for column in cursor.fetchall()]
+            logger.info(f"📊 Existing users table columns: {existing_columns}")
             
-            # Add picture column if it doesn't exist (for existing databases)
-            try:
-                cursor.execute("ALTER TABLE users ADD COLUMN picture TEXT")
-                logger.info("✅ Added picture column to users table")
-            except Exception as e:
-                logger.info(f"📝 Picture column handling: {str(e)}")
-            
-            # Try inserting with picture column, fallback without it if needed
-            try:
+            if not existing_columns:
+                # Table doesn't exist, create it with full schema
                 cursor.execute("""
-                    INSERT OR REPLACE INTO users (id, email, name, picture, verified_email, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (
-                    user_id,
-                    token_data.get('email', ''),
-                    token_data.get('name', ''),
-                    token_data.get('picture', ''),
-                    True,
-                    datetime.utcnow().isoformat()
-                ))
-                logger.info("✅ User inserted with picture column")
-            except Exception as picture_error:
-                logger.warning(f"❌ Picture column insert failed: {str(picture_error)}")
-                # Fallback: insert without picture column
-                try:
-                    cursor.execute("""
-                        INSERT OR REPLACE INTO users (id, email, name, verified_email, updated_at)
-                        VALUES (?, ?, ?, ?, ?)
-                    """, (
-                        user_id,
-                        token_data.get('email', ''),
-                        token_data.get('name', ''),
-                        True,
-                        datetime.utcnow().isoformat()
-                    ))
-                    logger.info("✅ User inserted without picture column (fallback)")
-                except Exception as fallback_error:
-                    logger.warning(f"❌ Verified_email column also missing: {str(fallback_error)}")
-                    # Final fallback: minimal user insert
-                    try:
-                        cursor.execute("""
-                            INSERT OR REPLACE INTO users (id, email, name, updated_at)
-                            VALUES (?, ?, ?, ?)
-                        """, (
-                            user_id,
-                            token_data.get('email', ''),
-                            token_data.get('name', ''),
-                            datetime.utcnow().isoformat()
-                        ))
-                        logger.info("✅ User inserted with minimal columns (final fallback)")
-                    except Exception as final_error:
-                        logger.error(f"❌ Final user insert failed: {str(final_error)}")
-                        raise final_error
+                    CREATE TABLE users (
+                        id TEXT PRIMARY KEY,
+                        email TEXT UNIQUE NOT NULL,
+                        name TEXT,
+                        picture TEXT,
+                        verified_email BOOLEAN DEFAULT TRUE,
+                        subscription_tier TEXT DEFAULT 'free',
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                existing_columns = ['id', 'email', 'name', 'picture', 'verified_email', 'subscription_tier', 'created_at', 'updated_at']
+                logger.info("✅ Created new users table with full schema")
+            
+            # Build INSERT statement based on available columns
+            available_data_columns = []
+            values = []
+            
+            # Always include required columns
+            if 'id' in existing_columns:
+                available_data_columns.append('id')
+                values.append(user_id)
+            if 'email' in existing_columns:
+                available_data_columns.append('email')
+                values.append(token_data.get('email', ''))
+            if 'name' in existing_columns:
+                available_data_columns.append('name')
+                values.append(token_data.get('name', ''))
+            
+            # Add optional columns if they exist
+            if 'picture' in existing_columns:
+                available_data_columns.append('picture')
+                values.append(token_data.get('picture', ''))
+            if 'verified_email' in existing_columns:
+                available_data_columns.append('verified_email')
+                values.append(True)
+            if 'updated_at' in existing_columns:
+                available_data_columns.append('updated_at')
+                values.append(datetime.utcnow().isoformat())
+            if 'created_at' in existing_columns:
+                available_data_columns.append('created_at')
+                values.append(datetime.utcnow().isoformat())
+            
+            # Build and execute dynamic INSERT statement
+            columns_str = ', '.join(available_data_columns)
+            placeholders = ', '.join(['?' for _ in available_data_columns])
+            
+            cursor.execute(f"""
+                INSERT OR REPLACE INTO users ({columns_str})
+                VALUES ({placeholders})
+            """, values)
+            
+            logger.info(f"✅ User inserted with available columns: {available_data_columns}")
             
             # Check user preferences and onboarding status
             cursor.execute("SELECT * FROM user_preferences WHERE user_id = ?", (user_id,))
