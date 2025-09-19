@@ -465,6 +465,14 @@ class AINewsRouter:
         try:
             logger.info("📰 Processing digest request")
             
+            # First check if there are any articles at all
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM articles")
+            total_count = cursor.fetchone()[0]
+            logger.info(f"📊 Total articles in database: {total_count}")
+            conn.close()
+            
             if params is None:
                 params = {}
             
@@ -472,14 +480,14 @@ class AINewsRouter:
             conn = self.get_db_connection()
             cursor = conn.cursor()
             
-            # Get recent articles with enhanced query
+            # Get recent articles with corrected query (using actual database schema)
             cursor.execute("""
-                SELECT title, description, content_summary, source, time, 
-                       impact, type, url, read_time, significance_score,
-                       thumbnail_url, audio_url, duration
+                SELECT title, content, summary, source, published_date, 
+                       'medium' as impact, 'blog' as type, url, '3 min' as read_time, significance_score,
+                       null as thumbnail_url, null as audio_url, null as duration
                 FROM articles 
-                WHERE date(time) >= date('now', '-2 days')
-                ORDER by significance_score DESC, time DESC
+                WHERE date(published_date) >= date('now', '-7 days')
+                ORDER by significance_score DESC, published_date DESC
                 LIMIT 50
             """)
             
@@ -487,15 +495,15 @@ class AINewsRouter:
             for row in cursor.fetchall():
                 articles.append({
                     "title": row[0] or "Untitled",
-                    "description": row[1] or "",
-                    "content_summary": row[2] or row[1] or "",
+                    "description": row[1] or "",  # content column
+                    "content_summary": row[2] or row[1] or "",  # summary column
                     "source": row[3] or "Unknown",
-                    "time": row[4] or datetime.utcnow().isoformat(),
+                    "time": row[4] or datetime.utcnow().isoformat(),  # published_date
                     "impact": row[5] or "medium",
                     "type": row[6] or "blog",
                     "url": row[7] or "#",
                     "readTime": row[8] or "3 min",
-                    "significanceScore": row[9] or 5.0,
+                    "significanceScore": float(row[9]) if row[9] else 5.0,
                     "thumbnail_url": row[10],
                     "imageUrl": row[10],
                     "audio_url": row[11],
