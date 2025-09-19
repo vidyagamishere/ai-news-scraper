@@ -29,7 +29,7 @@ except ImportError:
         cgi.parse_header = parse_header
 
 import feedparser
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
 from bs4 import BeautifulSoup
@@ -1252,6 +1252,56 @@ def categorize_articles_by_content_type(articles: List[Dict], content_type: str)
         categorized.extend(remaining_articles[:max(0, 10 - len(categorized))])
     
     return categorized
+
+@app.put("/api/auth/preferences")
+async def update_user_preferences(request: Request):
+    """Update user preferences"""
+    try:
+        # Get the request body
+        body = await request.json()
+        logger.info(f"📝 Updating user preferences: {body}")
+        
+        # Get authorization header
+        auth_header = request.headers.get('authorization', '')
+        if not auth_header.startswith('Bearer '):
+            raise HTTPException(status_code=401, detail="Invalid authorization header")
+        
+        token = auth_header[7:]  # Remove 'Bearer ' prefix
+        
+        if not auth_service:
+            raise HTTPException(status_code=500, detail="Auth service not initialized")
+        
+        # Get user by token
+        user = auth_service.get_user_by_token(token)
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid or expired token")
+        
+        # Update preferences
+        updated_user = auth_service.update_user_preferences(user.id, body)
+        if not updated_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        logger.info(f"✅ User preferences updated successfully for user {user.id}")
+        return updated_user
+        
+    except Exception as e:
+        logger.error(f"❌ Error updating user preferences: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to update preferences: {str(e)}")
+
+@app.get("/api/auth/topics")
+async def get_auth_topics():
+    """Get available AI topics for user preferences"""
+    try:
+        if not auth_service:
+            raise HTTPException(status_code=500, detail="Auth service not initialized")
+        
+        topics = auth_service.get_available_topics()
+        logger.info(f"📋 Returning {len(topics)} available topics")
+        return topics
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting topics: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get topics: {str(e)}")
 
 @app.get("/api/multimedia/scrape")
 async def scrape_multimedia():
