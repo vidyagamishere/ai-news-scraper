@@ -1611,6 +1611,25 @@ class AINewsRouter:
                             cursor.execute(f"UPDATE users SET {column_name} = {default_value} WHERE {column_name} IS NULL")
                     conn.commit()
             
+            # Ensure user_preferences table exists
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_preferences (
+                    user_id TEXT PRIMARY KEY,
+                    topics TEXT,
+                    newsletter_frequency TEXT DEFAULT 'weekly',
+                    email_notifications BOOLEAN DEFAULT TRUE,
+                    content_types TEXT,
+                    onboarding_completed BOOLEAN DEFAULT FALSE,
+                    newsletter_subscribed BOOLEAN DEFAULT TRUE,
+                    experience_level TEXT,
+                    role_type TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users (id)
+                )
+            """)
+            conn.commit()
+            
             cursor.execute("""
                 SELECT otp, name, expires_at FROM email_otps 
                 WHERE email = ? AND expires_at > ?
