@@ -33,7 +33,7 @@ RUN apt-get update && apt-get install -y \
 COPY --from=builder /root/.local /home/appuser/.local
 
 # Copy application code and requirements (Railway needs this in runtime)
-COPY api/ ./api/
+COPY api/ /app/api/
 COPY health_check.py .
 COPY requirements.txt .
 COPY .env.production .env
