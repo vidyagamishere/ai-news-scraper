@@ -937,9 +937,25 @@ class AINewsRouter:
             
             logger.info(f"✅ User inserted with available columns: {available_data_columns}")
             
-            # Check user preferences and onboarding status
-            cursor.execute("SELECT * FROM user_preferences WHERE user_id = ?", (user_id,))
-            user_prefs = cursor.fetchone()
+            # Check user preferences and onboarding status (create table if it doesn't exist)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_preferences (
+                    user_id TEXT PRIMARY KEY,
+                    topics TEXT DEFAULT '[]',
+                    content_types TEXT DEFAULT '[]',
+                    newsletter_frequency TEXT DEFAULT 'weekly',
+                    email_notifications BOOLEAN DEFAULT TRUE,
+                    onboarding_completed BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            try:
+                cursor.execute("SELECT * FROM user_preferences WHERE user_id = ?", (user_id,))
+                user_prefs = cursor.fetchone()
+            except:
+                user_prefs = None
             
             preferences = {
                 "topics": [],
