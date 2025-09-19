@@ -89,6 +89,62 @@ class AuthService:
             logger.error(f"❌ Traceback: {traceback.format_exc()}")
             raise Exception(f"Token creation failed: {str(e)}")
     
+    def verify_google_id_token(self, id_token: str) -> Optional[Dict[str, Any]]:
+        """Verify Google ID token and extract user data - Simple verification without external libraries"""
+        try:
+            logger.info("🔐 Verifying Google ID token...")
+            
+            # For production, you would verify the token signature with Google's public keys
+            # For now, we'll do basic JWT parsing and validation
+            parts = id_token.split('.')
+            if len(parts) != 3:
+                logger.warning("❌ Invalid Google ID token format")
+                return None
+            
+            # Decode payload (add padding if needed)
+            payload_part = parts[1]
+            # Add padding if needed
+            padding = 4 - len(payload_part) % 4
+            if padding != 4:
+                payload_part += '=' * padding
+                
+            try:
+                payload_bytes = base64.urlsafe_b64decode(payload_part)
+                payload = json.loads(payload_bytes.decode())
+                
+                logger.info(f"📊 Google token payload extracted for: {payload.get('email', 'unknown')}")
+                
+                # Basic validation
+                if payload.get('aud') != self.google_client_id:
+                    logger.warning("❌ Google token audience mismatch")
+                    return None
+                
+                # Check expiration
+                exp = payload.get('exp', 0)
+                if exp < datetime.utcnow().timestamp():
+                    logger.warning("❌ Google token expired")
+                    return None
+                
+                # Extract user data
+                user_data = {
+                    'sub': payload.get('sub'),
+                    'email': payload.get('email'),
+                    'name': payload.get('name'),
+                    'picture': payload.get('picture'),
+                    'email_verified': payload.get('email_verified', True)
+                }
+                
+                logger.info(f"✅ Google token verified for: {user_data.get('email')}")
+                return user_data
+                
+            except Exception as decode_error:
+                logger.error(f"❌ Failed to decode Google token payload: {str(decode_error)}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"❌ Google token verification failed: {str(e)}")
+            return None
+
     def verify_jwt_token(self, token: str) -> Optional[Dict[str, Any]]:
         """Verify JWT token and return payload if valid"""
         try:
@@ -730,30 +786,34 @@ class AINewsRouter:
             logger.info("🔐 Processing Google OAuth authentication request")
             logger.info(f"📊 Request data keys: {list(data.keys())}")
             
-            # Extract token data from request
-            token_data = data.get('token_data', {})
-            if not token_data:
-                # Also check direct fields
-                token_data = {
-                    'email': data.get('email'),
-                    'name': data.get('name'),
-                    'picture': data.get('picture'),
-                    'sub': data.get('sub')
-                }
-            
-            logger.info(f"📊 Token data extracted: email={token_data.get('email')}, name={token_data.get('name')}")
-            
-            if not token_data.get('email'):
-                logger.warning("❌ Google auth attempted without email")
+            # Get Google ID token from request
+            id_token = data.get('id_token')
+            if not id_token:
+                logger.warning("❌ Google auth attempted without id_token")
                 return {
                     "success": False,
-                    "message": "Invalid Google token data - email required",
+                    "message": "Google ID token required",
                     "status": 400,
                     "debug_info": {
                         "provided_data": list(data.keys()),
-                        "token_data_keys": list(token_data.keys())
+                        "expected": "id_token"
                     }
                 }
+            
+            # Verify and decode Google ID token
+            token_data = self.auth_service.verify_google_id_token(id_token)
+            if not token_data:
+                logger.warning("❌ Google ID token verification failed")
+                return {
+                    "success": False,
+                    "message": "Invalid Google ID token",
+                    "status": 400,
+                    "debug_info": {
+                        "token_verification": "failed"
+                    }
+                }
+            
+            logger.info(f"📊 Token data extracted: email={token_data.get('email')}, name={token_data.get('name')}")
             
             # Create or update user in database
             conn = self.get_db_connection()

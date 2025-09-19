@@ -49,8 +49,8 @@ from multimedia_scraper import (
 )
 
 # Import authentication components
-from api.auth_endpoints import auth_router, subscription_router, admin_router, init_auth_service
-from api.auth_service_postgres import AuthService
+from api.lib.auth_endpoints import auth_router, subscription_router, admin_router, init_auth_service
+from api.lib.auth_service_postgres import AuthService
 
 # Import comprehensive AI sources configuration
 from ai_sources_config import AI_SOURCES, FALLBACK_SCRAPING, CATEGORIES
