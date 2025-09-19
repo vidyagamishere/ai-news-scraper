@@ -1492,22 +1492,59 @@ class AINewsRouter:
             conn.commit()
             conn.close()
             
-            # In production, send actual email here
-            # For now, log the OTP for testing
-            logger.info(f"📧 OTP for {email}: {otp}")
-            
-            return {
-                "success": True,
-                "message": "OTP sent successfully",
-                "email": email,
-                "emailVerificationRequired": True,
-                "otpSent": True,
-                "expiresInMinutes": 10,
-                "debug_info": {
-                    "otp_for_testing": otp,  # Remove in production
-                    "timestamp": datetime.utcnow().isoformat()
+            # Send OTP email using existing Brevo service
+            try:
+                from .lib.email_service import EmailDigestService
+                email_service = EmailDigestService()
+                
+                # Send OTP email with user data format
+                user_data = {
+                    "email": email,
+                    "name": name or "AI Enthusiast"
                 }
-            }
+                email_sent = await email_service.send_otp_email(user_data, otp)
+                
+                if email_sent:
+                    logger.info(f"📧 OTP email sent successfully to {email}")
+                    return {
+                        "success": True,
+                        "message": "OTP sent successfully",
+                        "email": email,
+                        "emailVerificationRequired": True,
+                        "otpSent": True,
+                        "expiresInMinutes": 10
+                    }
+                else:
+                    logger.warning(f"📧 Email service failed for {email}, providing OTP for testing")
+                    return {
+                        "success": True,
+                        "message": "OTP generated (email service unavailable)",
+                        "email": email,
+                        "emailVerificationRequired": True,
+                        "otpSent": False,
+                        "expiresInMinutes": 10,
+                        "debug_info": {
+                            "otp_for_testing": otp,  # Fallback for testing
+                            "email_service_failed": True
+                        }
+                    }
+                    
+            except Exception as email_error:
+                logger.error(f"📧 Email service error: {str(email_error)}")
+                # Fallback: provide OTP for testing if email fails
+                logger.info(f"📧 Fallback OTP for {email}: {otp}")
+                return {
+                    "success": True,
+                    "message": "OTP generated (using fallback method)",
+                    "email": email,
+                    "emailVerificationRequired": True,
+                    "otpSent": False,
+                    "expiresInMinutes": 10,
+                    "debug_info": {
+                        "otp_for_testing": otp,  # Fallback for testing
+                        "email_error": str(email_error)
+                    }
+                }
             
         except Exception as e:
             logger.error(f"❌ Send OTP failed: {str(e)}")
