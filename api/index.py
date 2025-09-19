@@ -926,8 +926,22 @@ class AINewsRouter:
                     ))
                     logger.info("✅ User inserted without picture column (fallback)")
                 except Exception as fallback_error:
-                    logger.error(f"❌ User insert completely failed: {str(fallback_error)}")
-                    raise fallback_error
+                    logger.warning(f"❌ Verified_email column also missing: {str(fallback_error)}")
+                    # Final fallback: minimal user insert
+                    try:
+                        cursor.execute("""
+                            INSERT OR REPLACE INTO users (id, email, name, updated_at)
+                            VALUES (?, ?, ?, ?)
+                        """, (
+                            user_id,
+                            token_data.get('email', ''),
+                            token_data.get('name', ''),
+                            datetime.utcnow().isoformat()
+                        ))
+                        logger.info("✅ User inserted with minimal columns (final fallback)")
+                    except Exception as final_error:
+                        logger.error(f"❌ Final user insert failed: {str(final_error)}")
+                        raise final_error
             
             # Check user preferences and onboarding status
             cursor.execute("SELECT * FROM user_preferences WHERE user_id = ?", (user_id,))
