@@ -1591,8 +1591,8 @@ class AINewsRouter:
             
             # Ensure all required columns exist in users table
             required_columns = [
-                ('verified_email', 'BOOLEAN DEFAULT TRUE'),
-                ('updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
+                ('verified_email', 'BOOLEAN DEFAULT 1'),
+                ('updated_at', 'TIMESTAMP'),
                 ('picture', 'TEXT'),
                 ('subscription_tier', 'TEXT DEFAULT \'free\'')
             ]
