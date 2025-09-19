@@ -55,6 +55,40 @@ from api.lib.auth_service_postgres import AuthService
 # Import comprehensive AI sources configuration
 from ai_sources_config import AI_SOURCES, FALLBACK_SCRAPING, CATEGORIES
 
+# Content Types Configuration
+CONTENT_TYPES = {
+    "all_sources": {
+        "name": "All Sources",
+        "description": "Comprehensive AI content from all our curated sources",
+        "icon": "🌐"
+    },
+    "blogs": {
+        "name": "Blogs",
+        "description": "Expert insights, analysis, and thought leadership articles",
+        "icon": "✍️"
+    },
+    "podcasts": {
+        "name": "Podcasts",
+        "description": "Audio content, interviews, and discussions from AI leaders",
+        "icon": "🎧"
+    },
+    "videos": {
+        "name": "Videos",
+        "description": "Visual content, presentations, and educational videos",
+        "icon": "📹"
+    },
+    "events": {
+        "name": "Events",
+        "description": "AI conferences, webinars, workshops, and networking events",
+        "icon": "📅"
+    },
+    "learn": {
+        "name": "Learn",
+        "description": "Courses, tutorials, educational content, and skill development",
+        "icon": "🎓"
+    }
+}
+
 # Load environment variables
 load_dotenv()
 
@@ -1126,6 +1160,98 @@ async def get_sources():
         "enabled_count": len([s for s in AI_SOURCES if s.get('enabled', True)]),
         "claude_available": processor.has_claude if processor else False
     }
+
+@app.get("/api/content-types")
+async def get_content_types():
+    """Get available content types with descriptions"""
+    return {"content_types": CONTENT_TYPES}
+
+@app.get("/api/content/{content_type}")
+async def get_content_by_type(content_type: str):
+    """Get content filtered by type (blogs, podcasts, videos, etc.)"""
+    try:
+        logger.info(f"📂 Processing content request for type: {content_type}")
+        
+        # Validate content type
+        if content_type not in CONTENT_TYPES:
+            logger.warning(f"❌ Invalid content type requested: {content_type}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid content type. Available types: {list(CONTENT_TYPES.keys())}"
+            )
+        
+        # Get articles from database
+        if not db_manager:
+            raise HTTPException(status_code=503, detail="Database service unavailable")
+        
+        # Get all recent articles
+        all_articles = db_manager.get_recent_articles(hours=168, user_tier='free')  # 7 days
+        
+        # Categorize articles based on content type
+        categorized_articles = categorize_articles_by_content_type(all_articles, content_type)
+        
+        # Limit results based on content type
+        max_articles = 20 if content_type == "all_sources" else 10
+        limited_articles = categorized_articles[:max_articles]
+        
+        response = {
+            "content_type": content_type,
+            "content_info": CONTENT_TYPES[content_type],
+            "articles": limited_articles,
+            "total": len(limited_articles),
+            "total_available": len(categorized_articles),
+            "sources_available": len(set(article.get("source", "") for article in limited_articles)),
+            "user_tier": "free",
+            "timestamp": datetime.utcnow().isoformat(),
+            "featured_sources": []
+        }
+        
+        logger.info(f"✅ Returning {len(limited_articles)} articles for {content_type}")
+        return response
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting content for type {content_type}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get {content_type} content: {str(e)}")
+
+def categorize_articles_by_content_type(articles: List[Dict], content_type: str) -> List[Dict]:
+    """Categorize articles based on content type using keywords and sources"""
+    if content_type == "all_sources":
+        return articles
+    
+    # Keywords for different content types
+    content_keywords = {
+        "blogs": ["blog", "article", "post", "analysis", "insight", "opinion", "commentary"],
+        "podcasts": ["podcast", "audio", "interview", "conversation", "discussion", "talk"],
+        "videos": ["video", "youtube", "tutorial", "presentation", "demo", "webinar"],
+        "events": ["conference", "event", "summit", "meetup", "workshop", "webinar", "2024", "2025"],
+        "learn": ["course", "tutorial", "guide", "learn", "education", "training", "certification"]
+    }
+    
+    keywords = content_keywords.get(content_type, [])
+    categorized = []
+    
+    for article in articles:
+        title_lower = (article.get("title", "") or "").lower()
+        source_lower = (article.get("source", "") or "").lower()
+        summary_lower = (article.get("summary", "") or "").lower()
+        
+        # Check if article matches content type keywords
+        matches_type = any(
+            keyword in title_lower or 
+            keyword in source_lower or 
+            keyword in summary_lower
+            for keyword in keywords
+        )
+        
+        if matches_type:
+            categorized.append(article)
+    
+    # If we don't have enough categorized content, include some general articles
+    if len(categorized) < 5 and content_type != "all_sources":
+        remaining_articles = [a for a in articles if a not in categorized]
+        categorized.extend(remaining_articles[:max(0, 10 - len(categorized))])
+    
+    return categorized
 
 @app.get("/api/multimedia/scrape")
 async def scrape_multimedia():

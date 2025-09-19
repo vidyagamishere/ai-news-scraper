@@ -200,6 +200,43 @@ class AuthService:
         return self.verify_jwt_token(token)
 
 # =============================================================================
+# CONTENT TYPES CONFIGURATION
+# =============================================================================
+
+CONTENT_TYPES = {
+    "all_sources": {
+        "name": "All Sources",
+        "description": "Comprehensive AI content from all our curated sources",
+        "icon": "🌐"
+    },
+    "blogs": {
+        "name": "Blogs",
+        "description": "Expert insights, analysis, and thought leadership articles",
+        "icon": "✍️"
+    },
+    "podcasts": {
+        "name": "Podcasts",
+        "description": "Audio content, interviews, and discussions from AI leaders",
+        "icon": "🎧"
+    },
+    "videos": {
+        "name": "Videos",
+        "description": "Visual content, presentations, and educational videos",
+        "icon": "📹"
+    },
+    "events": {
+        "name": "Events",
+        "description": "AI conferences, webinars, workshops, and networking events",
+        "icon": "📅"
+    },
+    "learn": {
+        "name": "Learn",
+        "description": "Courses, tutorials, educational content, and skill development",
+        "icon": "🎓"
+    }
+}
+
+# =============================================================================
 # MAIN ROUTER CLASS - Handles ALL API Endpoints
 # =============================================================================
 
@@ -345,6 +382,10 @@ class AINewsRouter:
             elif endpoint == "content-types":
                 logger.info("📂 Routing to content-types handler")
                 return await self.handle_content_types()
+            elif endpoint.startswith("content/"):
+                logger.info(f"📂 Routing to content handler: {endpoint}")
+                content_type = endpoint.split("/", 1)[1]  # Extract content type from "content/blogs"
+                return await self.handle_content_by_type(content_type, headers, params)
             elif endpoint == "personalized-digest":
                 logger.info("👤 Routing to personalized-digest handler")
                 return await self.handle_personalized_digest(headers, params)
@@ -362,7 +403,7 @@ class AINewsRouter:
                 return {
                     "error": f"Endpoint '{endpoint}' not found in router",
                     "available_endpoints": [
-                        "health", "digest", "sources", "test-neon", "content-types",
+                        "health", "digest", "sources", "test-neon", "content-types", "content/*",
                         "personalized-digest", "user-preferences", "auth/*", "admin/*"
                     ],
                     "router_architecture": "single_function",
@@ -688,7 +729,7 @@ class AINewsRouter:
         """Get available content types with debug info"""
         logger.info("📂 Processing content-types request")
         return {
-            "content_types": ["blog", "audio", "video"],
+            "content_types": CONTENT_TYPES,
             "filtering_available": True,
             "personalization_supported": True,
             "router_endpoint": True,
@@ -697,6 +738,119 @@ class AINewsRouter:
                 "router_handled": True
             }
         }
+    
+    async def handle_content_by_type(self, content_type: str, headers: Dict, params: Dict = None) -> Dict[str, Any]:
+        """Get content filtered by type (blogs, podcasts, videos, etc.)"""
+        try:
+            logger.info(f"📂 Processing content request for type: {content_type}")
+            
+            # Validate content type
+            if content_type not in CONTENT_TYPES:
+                logger.warning(f"❌ Invalid content type requested: {content_type}")
+                return {
+                    "error": f"Invalid content type. Available types: {list(CONTENT_TYPES.keys())}",
+                    "content_type": content_type,
+                    "available_types": list(CONTENT_TYPES.keys())
+                }
+            
+            # Get database connection
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+            
+            # Get articles from database
+            # For now, we'll return all recent articles but categorize them by type
+            cursor.execute("""
+                SELECT title, summary, url, source, published_date, significance_score
+                FROM articles 
+                WHERE published_date >= datetime('now', '-7 days')
+                ORDER BY significance_score DESC, published_date DESC
+                LIMIT 50
+            """)
+            
+            all_articles = []
+            for row in cursor.fetchall():
+                article = {
+                    "title": row[0],
+                    "summary": row[1],
+                    "url": row[2],
+                    "source": row[3],
+                    "published_date": row[4],
+                    "significance_score": row[5]
+                }
+                all_articles.append(article)
+            
+            conn.close()
+            
+            # Categorize articles based on content type
+            categorized_articles = self.categorize_articles_by_content_type(all_articles, content_type)
+            
+            # Limit results based on content type
+            max_articles = 20 if content_type == "all_sources" else 10
+            limited_articles = categorized_articles[:max_articles]
+            
+            response = {
+                "content_type": content_type,
+                "content_info": CONTENT_TYPES[content_type],
+                "articles": limited_articles,
+                "total": len(limited_articles),
+                "total_available": len(categorized_articles),
+                "sources_available": len(set(article.get("source", "") for article in limited_articles)),
+                "user_tier": "free",  # For now, default to free
+                "timestamp": datetime.utcnow().isoformat(),
+                "featured_sources": []
+            }
+            
+            logger.info(f"✅ Returning {len(limited_articles)} articles for {content_type}")
+            return response
+            
+        except Exception as e:
+            logger.error(f"❌ Error getting content for type {content_type}: {str(e)}")
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            return {
+                "error": f"Failed to get {content_type} content: {str(e)}",
+                "content_type": content_type,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+    
+    def categorize_articles_by_content_type(self, articles: List[Dict], content_type: str) -> List[Dict]:
+        """Categorize articles based on content type using keywords and sources"""
+        if content_type == "all_sources":
+            return articles
+        
+        # Keywords for different content types
+        content_keywords = {
+            "blogs": ["blog", "article", "post", "analysis", "insight", "opinion", "commentary"],
+            "podcasts": ["podcast", "audio", "interview", "conversation", "discussion", "talk"],
+            "videos": ["video", "youtube", "tutorial", "presentation", "demo", "webinar"],
+            "events": ["conference", "event", "summit", "meetup", "workshop", "webinar", "2024", "2025"],
+            "learn": ["course", "tutorial", "guide", "learn", "education", "training", "certification"]
+        }
+        
+        keywords = content_keywords.get(content_type, [])
+        categorized = []
+        
+        for article in articles:
+            title_lower = (article.get("title", "") or "").lower()
+            source_lower = (article.get("source", "") or "").lower()
+            summary_lower = (article.get("summary", "") or "").lower()
+            
+            # Check if article matches content type keywords
+            matches_type = any(
+                keyword in title_lower or 
+                keyword in source_lower or 
+                keyword in summary_lower
+                for keyword in keywords
+            )
+            
+            if matches_type:
+                categorized.append(article)
+        
+        # If we don't have enough categorized content, include some general articles
+        if len(categorized) < 5 and content_type != "all_sources":
+            remaining_articles = [a for a in articles if a not in categorized]
+            categorized.extend(remaining_articles[:max(0, 10 - len(categorized))])
+        
+        return categorized
     
     async def handle_personalized_digest(self, headers: Dict, params: Dict = None) -> Dict[str, Any]:
         """Get personalized digest - requires authentication"""
@@ -957,12 +1111,13 @@ class AINewsRouter:
             except:
                 user_prefs = None
             
+            # For Google auth users, set reasonable defaults and skip onboarding
             preferences = {
                 "topics": [],
                 "newsletter_frequency": "weekly", 
                 "email_notifications": True,
                 "content_types": ["blogs", "podcasts", "videos"],
-                "onboarding_completed": False
+                "onboarding_completed": True  # Google users can skip onboarding
             }
             
             if user_prefs:
