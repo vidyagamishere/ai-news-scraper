@@ -946,6 +946,10 @@ class AINewsRouter:
                 return await self.handle_auth_signup(body or {})
             elif auth_endpoint == "login" and method == "POST":
                 return await self.handle_auth_login(body or {})
+            elif auth_endpoint == "send-otp" and method == "POST":
+                return await self.handle_send_otp(body or {})
+            elif auth_endpoint == "verify-otp" and method == "POST":
+                return await self.handle_verify_otp(body or {})
             elif auth_endpoint == "verify":
                 return await self.handle_auth_verify(headers)
             elif auth_endpoint == "logout" and method == "POST":
@@ -1428,6 +1432,229 @@ class AINewsRouter:
             return {
                 "success": False,
                 "message": f"Login failed: {str(e)}",
+                "status": 500,
+                "debug_info": {"traceback": traceback.format_exc()}
+            }
+    
+    async def handle_send_otp(self, data: Dict) -> Dict[str, Any]:
+        """Send OTP for email verification"""
+        try:
+            logger.info("📧 Processing send OTP request")
+            logger.info(f"📊 OTP data keys: {list(data.keys())}")
+            
+            # Validate required fields
+            email = data.get('email', '').strip().lower()
+            name = data.get('name', '').strip()
+            
+            if not email:
+                return {
+                    "success": False,
+                    "message": "Email is required",
+                    "status": 400
+                }
+            
+            # Basic email validation
+            if '@' not in email or '.' not in email:
+                return {
+                    "success": False,
+                    "message": "Please enter a valid email address",
+                    "status": 400
+                }
+            
+            # Generate 6-digit OTP
+            import random
+            otp = str(random.randint(100000, 999999))
+            
+            # Store OTP temporarily (in production, use Redis or similar)
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+            
+            # Create OTP storage table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS email_otps (
+                    email TEXT PRIMARY KEY,
+                    otp TEXT NOT NULL,
+                    name TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TIMESTAMP NOT NULL
+                )
+            """)
+            
+            # Store OTP with 10-minute expiration
+            from datetime import timedelta
+            expires_at = datetime.utcnow() + timedelta(minutes=10)
+            
+            cursor.execute("""
+                INSERT OR REPLACE INTO email_otps (email, otp, name, expires_at)
+                VALUES (?, ?, ?, ?)
+            """, (email, otp, name, expires_at.isoformat()))
+            
+            conn.commit()
+            conn.close()
+            
+            # In production, send actual email here
+            # For now, log the OTP for testing
+            logger.info(f"📧 OTP for {email}: {otp}")
+            
+            return {
+                "success": True,
+                "message": "OTP sent successfully",
+                "email": email,
+                "emailVerificationRequired": True,
+                "otpSent": True,
+                "expiresInMinutes": 10,
+                "debug_info": {
+                    "otp_for_testing": otp,  # Remove in production
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Send OTP failed: {str(e)}")
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            return {
+                "success": False,
+                "message": f"Failed to send OTP: {str(e)}",
+                "status": 500,
+                "debug_info": {"traceback": traceback.format_exc()}
+            }
+    
+    async def handle_verify_otp(self, data: Dict) -> Dict[str, Any]:
+        """Verify OTP and create user account"""
+        try:
+            logger.info("🔐 Processing OTP verification request")
+            logger.info(f"📊 Verification data keys: {list(data.keys())}")
+            
+            # Validate required fields
+            email = data.get('email', '').strip().lower()
+            otp = data.get('otp', '').strip()
+            user_data = data.get('userData', {})
+            
+            if not email or not otp:
+                return {
+                    "success": False,
+                    "message": "Email and OTP are required",
+                    "status": 400
+                }
+            
+            # Verify OTP
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT otp, name, expires_at FROM email_otps 
+                WHERE email = ? AND expires_at > ?
+            """, (email, datetime.utcnow().isoformat()))
+            
+            otp_record = cursor.fetchone()
+            
+            if not otp_record:
+                conn.close()
+                return {
+                    "success": False,
+                    "message": "OTP expired or not found",
+                    "status": 400
+                }
+            
+            if otp_record['otp'] != otp:
+                conn.close()
+                return {
+                    "success": False,
+                    "message": "Invalid OTP",
+                    "status": 400
+                }
+            
+            # Check if user already exists
+            cursor.execute("SELECT id FROM users WHERE email = ?", (email,))
+            if cursor.fetchone():
+                # Delete used OTP
+                cursor.execute("DELETE FROM email_otps WHERE email = ?", (email,))
+                conn.commit()
+                conn.close()
+                return {
+                    "success": False,
+                    "message": "An account with this email already exists",
+                    "status": 409
+                }
+            
+            # Create user account
+            import uuid
+            user_id = str(uuid.uuid4())
+            name = otp_record['name'] or user_data.get('name', email.split('@')[0])
+            
+            # Insert new user
+            cursor.execute("""
+                INSERT INTO users (id, email, name, verified_email, subscription_tier, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                user_id, email, name, True, 'free',
+                datetime.utcnow().isoformat(),
+                datetime.utcnow().isoformat()
+            ))
+            
+            # Create default preferences with onboarding not completed
+            cursor.execute("""
+                INSERT INTO user_preferences (
+                    user_id, topics, content_types, newsletter_frequency, 
+                    email_notifications, onboarding_completed
+                ) VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                user_id, '[]', '["blogs", "podcasts", "videos"]', 'weekly', True, False
+            ))
+            
+            # Delete used OTP
+            cursor.execute("DELETE FROM email_otps WHERE email = ?", (email,))
+            
+            conn.commit()
+            conn.close()
+            
+            # Create JWT token
+            token_data = {
+                'sub': user_id,
+                'email': email,
+                'name': name,
+                'picture': '',
+                'iat': int(datetime.utcnow().timestamp()),
+                'exp': int((datetime.utcnow() + timedelta(hours=24)).timestamp())
+            }
+            jwt_token = self.auth_service.create_jwt_token(token_data)
+            
+            logger.info(f"✅ OTP verification and user creation successful: {email}")
+            return {
+                "success": True,
+                "message": "Account created successfully",
+                "token": jwt_token,
+                "user": {
+                    "id": user_id,
+                    "email": email,
+                    "name": name,
+                    "picture": "",
+                    "verified_email": True,
+                    "subscription_tier": "free",
+                    "preferences": {
+                        "topics": [],
+                        "content_types": ["blogs", "podcasts", "videos"],
+                        "newsletter_frequency": "weekly",
+                        "email_notifications": True,
+                        "onboarding_completed": False
+                    }
+                },
+                "isUserExist": False,
+                "expires_in": 86400,
+                "router_auth": True,
+                "debug_info": {
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "user_created": True,
+                    "email_verified": True
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ OTP verification failed: {str(e)}")
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            return {
+                "success": False,
+                "message": f"OTP verification failed: {str(e)}",
                 "status": 500,
                 "debug_info": {"traceback": traceback.format_exc()}
             }
