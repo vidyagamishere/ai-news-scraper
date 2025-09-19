@@ -1,0 +1,7 @@
+# Minimal FastAPI dependencies for testing
+fastapi>=0.68.0
+uvicorn>=0.15.0
+python-dotenv>=0.19.0
+
+# PostgreSQL database dependencies
+psycopg2-binary>=2.9.0

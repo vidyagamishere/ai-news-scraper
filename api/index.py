@@ -513,8 +513,21 @@ class AINewsRouter:
                 if content_type in content_by_type:
                     content_by_type[content_type].append(article)
                 
-                # Add to top stories if high significance
-                if article["significanceScore"] > 7.0 and len(top_stories) < 5:
+                # Add to top stories if high significance (lowered threshold for debugging)
+                if article["significanceScore"] > 5.0 and len(top_stories) < 5:
+                    top_stories.append({
+                        "title": article["title"],
+                        "source": article["source"],
+                        "significanceScore": article["significanceScore"],
+                        "url": article["url"],
+                        "imageUrl": article.get("imageUrl"),
+                        "summary": article["content_summary"]
+                    })
+            
+            # Fallback: if no top stories found, use the highest rated articles
+            if len(top_stories) == 0 and len(articles) > 0:
+                logger.info("📰 No articles above significance threshold, using fallback top stories")
+                for article in articles[:3]:  # Take top 3 by significance
                     top_stories.append({
                         "title": article["title"],
                         "source": article["source"],
@@ -560,7 +573,8 @@ class AINewsRouter:
                 }
             }
             
-            logger.info(f"✅ Digest generated successfully with {total_articles} articles")
+            logger.info(f"✅ Digest generated successfully with {total_articles} articles, {len(top_stories)} top stories")
+            logger.info(f"📊 Top stories preview: {[story['title'][:50] for story in top_stories[:2]]}")
             return digest_response
             
         except Exception as e:

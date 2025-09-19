@@ -1,0 +1,4 @@
+# Complete requirements for Neon PostgreSQL FastAPI serverless function
+fastapi>=0.68.0
+asyncpg==0.29.0
+python-dotenv>=0.19.0
