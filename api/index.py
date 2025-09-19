@@ -892,20 +892,42 @@ class AINewsRouter:
             # Add picture column if it doesn't exist (for existing databases)
             try:
                 cursor.execute("ALTER TABLE users ADD COLUMN picture TEXT")
-            except:
-                pass  # Column already exists
+                logger.info("✅ Added picture column to users table")
+            except Exception as e:
+                logger.info(f"📝 Picture column handling: {str(e)}")
             
-            cursor.execute("""
-                INSERT OR REPLACE INTO users (id, email, name, picture, verified_email, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (
-                user_id,
-                token_data.get('email', ''),
-                token_data.get('name', ''),
-                token_data.get('picture', ''),
-                True,
-                datetime.utcnow().isoformat()
-            ))
+            # Try inserting with picture column, fallback without it if needed
+            try:
+                cursor.execute("""
+                    INSERT OR REPLACE INTO users (id, email, name, picture, verified_email, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (
+                    user_id,
+                    token_data.get('email', ''),
+                    token_data.get('name', ''),
+                    token_data.get('picture', ''),
+                    True,
+                    datetime.utcnow().isoformat()
+                ))
+                logger.info("✅ User inserted with picture column")
+            except Exception as picture_error:
+                logger.warning(f"❌ Picture column insert failed: {str(picture_error)}")
+                # Fallback: insert without picture column
+                try:
+                    cursor.execute("""
+                        INSERT OR REPLACE INTO users (id, email, name, verified_email, updated_at)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (
+                        user_id,
+                        token_data.get('email', ''),
+                        token_data.get('name', ''),
+                        True,
+                        datetime.utcnow().isoformat()
+                    ))
+                    logger.info("✅ User inserted without picture column (fallback)")
+                except Exception as fallback_error:
+                    logger.error(f"❌ User insert completely failed: {str(fallback_error)}")
+                    raise fallback_error
             
             # Check user preferences and onboarding status
             cursor.execute("SELECT * FROM user_preferences WHERE user_id = ?", (user_id,))
