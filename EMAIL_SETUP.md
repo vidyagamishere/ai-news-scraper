@@ -67,10 +67,10 @@ Your AI News Scraper now includes a comprehensive email digest system that sends
 
 ### **Step 3: Configure Environment Variables**
 
-**In Vercel Dashboard:**
+**In Railway Dashboard:**
 
 1. Go to your `ai-news-scraper` project
-2. Settings → Environment Variables
+2. Variables tab
 3. Add these variables:
 
 ```
@@ -79,26 +79,26 @@ FROM_EMAIL = noreply@yourdomain.com
 FROM_NAME = AI Daily
 ```
 
-**Or via Vercel CLI:**
+**Or via Railway CLI:**
 
 ```bash
-vercel env add SENDGRID_API_KEY
-vercel env add FROM_EMAIL  
-vercel env add FROM_NAME
+railway variables set SENDGRID_API_KEY=your_api_key
+railway variables set FROM_EMAIL=noreply@yourdomain.com
+railway variables set FROM_NAME="AI Daily"
 ```
 
 ### **Step 4: Deploy Updated Backend**
 
 ```bash
 cd /Users/vijayansubramaniyan/Desktop/AI-ML/Projects/ai-news-scraper
-vercel --prod
+railway up
 ```
 
 ### **Step 5: Deploy Updated Frontend**
 
 ```bash
 cd /Users/vijayansubramaniyan/Desktop/AI-ML/Projects/ai-digest
-vercel --prod
+# Deploy frontend as usual
 ```
 
 ## Testing Your Email System
@@ -114,12 +114,12 @@ vercel --prod
 
 ```bash
 # Send digest email (replace TOKEN with your JWT)
-curl -X POST "https://ai-news-scraper.vercel.app/email/send-digest" \
+curl -X POST "https://your-railway-app.up.railway.app/email/send-digest" \
   -H "Authorization: Bearer YOUR_JWT_TOKEN" \
   -H "Content-Type: application/json"
 
 # Preview email
-curl -X GET "https://ai-news-scraper.vercel.app/email/preview-digest" \
+curl -X GET "https://your-railway-app.up.railway.app/email/preview-digest" \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 
@@ -210,8 +210,8 @@ GET /admin/subscribers - List all subscribers
 
 ### **Debugging:**
 
-1. **Check Vercel Function Logs:**
-   - Go to Vercel Dashboard → Functions
+1. **Check Railway Logs:**
+   - Go to Railway Dashboard → Deployments
    - View logs for email-related errors
 
 2. **Test API Endpoints:**
@@ -263,7 +263,7 @@ GET /admin/subscribers - List all subscribers
 - [Deliverability Guide](https://sendgrid.com/blog/email-deliverability-best-practices/)
 
 ### **Need Help?**
-- Check Vercel function logs for errors
+- Check Railway deployment logs for errors
 - Test with SendGrid's Email API testing tool
 - Monitor SendGrid activity feed for delivery issues
 

@@ -93,5 +93,5 @@ https://your-project-name-production.up.railway.app
 After Railway deployment:
 1. Get the Railway URL from dashboard
 2. Update frontend `VITE_API_BASE` to use Railway URL
-3. Redeploy frontend to Vercel
+3. Redeploy frontend
 4. Test end-to-end integration

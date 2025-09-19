@@ -1,2 +1,0 @@
-# Ultra minimal for debugging Vercel deployment
-fastapi

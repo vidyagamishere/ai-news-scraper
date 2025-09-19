@@ -42,18 +42,6 @@ docker-compose ps
 curl http://your-server:8000/api/health
 ```
 
-### Option 4: Vercel (Serverless)
-```bash
-# 1. Install Vercel CLI
-npm install -g vercel
-
-# 2. Deploy
-vercel --prod
-
-# 3. Set environment variables
-vercel env add CLAUDE_API_KEY
-vercel env add ALLOWED_ORIGINS
-```
 
 ---
 

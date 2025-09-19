@@ -218,7 +218,7 @@ def print_next_steps(env_ok, service_ok, template_ok, connectivity_ok):
     
     if not env_ok:
         print("❌ Fix Environment Variables:")
-        print("   1. Set SENDGRID_API_KEY in Vercel dashboard")
+        print("   1. Set SENDGRID_API_KEY in Railway dashboard")
         print("   2. Set FROM_EMAIL to your verified sender email")
         print("   3. Redeploy your backend")
     
@@ -242,8 +242,8 @@ def print_next_steps(env_ok, service_ok, template_ok, connectivity_ok):
     
     else:
         print("✅ ALL TESTS PASSED! Ready for live testing:")
-        print("   1. Deploy your backend: vercel --prod")
-        print("   2. Deploy your frontend: vercel --prod")
+        print("   1. Deploy your backend: railway up")
+        print("   2. Deploy your frontend")
         print("   3. Sign in to your app")
         print("   4. Click 'Send Test Email' in user menu")
         print("   5. Check your inbox!")

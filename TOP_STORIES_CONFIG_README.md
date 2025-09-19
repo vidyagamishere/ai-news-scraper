@@ -15,7 +15,7 @@ Each story in the `TOP_STORIES` array contains:
 ### Modifying Stories
 1. Open `top_stories_config.py`
 2. Edit any story entry in the `TOP_STORIES` array
-3. Deploy the backend to apply changes: `npx vercel --prod`
+3. Deploy the backend to apply changes: `railway up`
 
 ### URL Guidelines
 - Use authentic URLs from official company blogs/announcements
@@ -60,6 +60,6 @@ The API includes intelligent web scraping capabilities:
 
 ## Deployment
 After modifying the configuration:
-1. Run `npx vercel --prod` from the ai-news-scraper directory
+1. Run `railway up` from the ai-news-scraper directory
 2. The new URLs will be live immediately
 3. No frontend changes needed unless you modify the story structure
