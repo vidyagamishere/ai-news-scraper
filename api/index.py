@@ -1533,12 +1533,21 @@ class AINewsRouter:
                     except ImportError as e2:
                         logger.warning(f"Path manipulation import failed: {e2}")
                         try:
-                            # Try absolute import
-                            sys.path.insert(0, '/app/api/lib')
-                            from email_service import EmailDigestService  
-                            email_service = EmailDigestService()
-                            logger.info("📧 EmailDigestService imported with absolute path")
-                        except ImportError as e3:
+                            # Try with explicit module path
+                            import importlib.util
+                            spec = importlib.util.spec_from_file_location(
+                                "email_service", 
+                                os.path.join(api_dir, 'lib', 'email_service.py')
+                            )
+                            if spec and spec.loader:
+                                email_module = importlib.util.module_from_spec(spec)
+                                spec.loader.exec_module(email_module)
+                                EmailDigestService = email_module.EmailDigestService
+                                email_service = EmailDigestService()
+                                logger.info("📧 EmailDigestService imported with importlib")
+                            else:
+                                email_service = None
+                        except Exception as e3:
                             logger.warning(f"All import attempts failed: {e3}")
                             email_service = None
                 
