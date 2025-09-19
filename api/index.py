@@ -1591,18 +1591,24 @@ class AINewsRouter:
             
             # Ensure all required columns exist in users table
             required_columns = [
-                ('verified_email', 'BOOLEAN DEFAULT 1'),
-                ('updated_at', 'TIMESTAMP'),
-                ('picture', 'TEXT'),
-                ('subscription_tier', 'TEXT DEFAULT \'free\'')
+                ('verified_email', 'BOOLEAN', True),
+                ('updated_at', 'TIMESTAMP', None),
+                ('picture', 'TEXT', None),
+                ('subscription_tier', 'TEXT', 'free')
             ]
             
-            for column_name, column_def in required_columns:
+            for column_name, column_type, default_value in required_columns:
                 try:
                     cursor.execute(f"SELECT {column_name} FROM users LIMIT 1")
                 except sqlite3.OperationalError:
                     logger.info(f"Adding {column_name} column to users table")
-                    cursor.execute(f"ALTER TABLE users ADD COLUMN {column_name} {column_def}")
+                    cursor.execute(f"ALTER TABLE users ADD COLUMN {column_name} {column_type}")
+                    if default_value is not None:
+                        # Set default value for existing rows
+                        if isinstance(default_value, str):
+                            cursor.execute(f"UPDATE users SET {column_name} = ? WHERE {column_name} IS NULL", (default_value,))
+                        else:
+                            cursor.execute(f"UPDATE users SET {column_name} = {default_value} WHERE {column_name} IS NULL")
                     conn.commit()
             
             cursor.execute("""
