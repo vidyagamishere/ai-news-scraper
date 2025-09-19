@@ -1,33 +1,23 @@
-# Ignore unused main files to avoid function limit
-api/main.py
-api/main_clean.py
-api/main_working.py
-api/simple_main.py
-api/test.py
-api/test_minimal.py
+# Force Vercel to detect as Python backend only
+# Ignore HTML files that make Vercel think this is frontend
+admin_validation.html
+*.html
 
-# Ignore development files
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-*.log
-.DS_Store
-.env.local
-.env.development
-
-# Ignore config files that might interfere
-vercel_auth.json
-vercel-simple.json
-main.py
+# Ignore conflicting Python files in root
+index.py
 main_*.py
 
-# Ignore large files
-*.db
-*.sqlite
-*.sqlite3
+# Ignore directories that might confuse detection
+archive/
+deploy/
+lib/
+venv/
 
-# Ignore temporary files
-/tmp/
-.cache/
+# Ignore documentation
+*.md
+
+# Keep only essential backend files
+!api/
+!requirements.txt
+!runtime.txt
+!vercel.json

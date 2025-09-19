@@ -1,7 +1,0 @@
-# Enhanced scraping system dependencies
-anthropic>=0.7.0
-feedparser>=6.0.0
-beautifulsoup4>=4.12.0
-pytz>=2023.3
-schedule>=1.2.0
-requests>=2.31.0

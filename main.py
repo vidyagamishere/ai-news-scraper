@@ -48,6 +48,10 @@ from multimedia_scraper import (
     MULTIMEDIA_SOURCES
 )
 
+# Import authentication components
+from api.auth_endpoints import auth_router, subscription_router, admin_router, init_auth_service
+from api.auth_service_postgres import AuthService
+
 # Import comprehensive AI sources configuration
 from ai_sources_config import AI_SOURCES, FALLBACK_SCRAPING, CATEGORIES
 
@@ -83,6 +87,7 @@ scheduler = None
 multimedia_db_manager = None
 multimedia_scraper = None
 multimedia_processor = None
+auth_service = None
 scraping_status = {"in_progress": False, "last_run": None, "errors": []}
 
 class CacheManager:
@@ -132,7 +137,7 @@ class RateLimiter:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifecycle"""
-    global db_manager, scraper, processor, cache_manager, scheduler
+    global db_manager, scraper, processor, cache_manager, scheduler, auth_service
     global multimedia_db_manager, multimedia_scraper, multimedia_processor
     
     # Startup
@@ -142,6 +147,16 @@ async def lifespan(app: FastAPI):
     cache_manager = CacheManager()
     db_manager = DatabaseManager(os.getenv("DATABASE_PATH", "ai_news.db"))
     scraper = AINewsScraper(db_manager, cache_manager)
+    
+    # Initialize authentication service
+    # Use POSTGRES_URL if available, otherwise fallback to DATABASE_PATH
+    database_url = os.getenv("POSTGRES_URL") or os.getenv("DATABASE_PATH", "ai_news.db")
+    auth_service = AuthService(
+        database_url=database_url,
+        jwt_secret=os.getenv("JWT_SECRET", "your-secret-key-change-in-production"),
+        google_client_id=os.getenv("GOOGLE_CLIENT_ID")
+    )
+    init_auth_service(auth_service)
     
     # Initialize multimedia components
     multimedia_db_manager = MultimediaDatabaseManager(os.getenv("DATABASE_PATH", "ai_news.db"))
@@ -218,9 +233,49 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "OPTIONS"],
     allow_headers=["*"],
 )
+
+# Include authentication routers
+app.include_router(auth_router, prefix="/api")
+app.include_router(subscription_router, prefix="/api")  
+app.include_router(admin_router, prefix="/api")
+
+# Database verification endpoint for debugging
+@app.get("/api/db-info")
+async def get_database_info():
+    """Get database information for verification"""
+    try:
+        db_type = "PostgreSQL" if hasattr(auth_service, 'db') and auth_service.db.is_postgres else "SQLite"
+        print(f"🔍 [DB-INFO] Database type: {db_type}")
+        
+        if hasattr(auth_service, 'db'):
+            db_url = auth_service.db.database_url
+            print(f"🔍 [DB-INFO] Database URL: {db_url[:50]}..." if len(db_url) > 50 else f"🔍 [DB-INFO] Database URL: {db_url}")
+            
+            # Test database connection
+            try:
+                with auth_service.db.get_connection() as conn:
+                    print(f"✅ [DB-INFO] Database connection test successful")
+                    return {
+                        "database_type": db_type,
+                        "database_url_prefix": db_url[:50] + "..." if len(db_url) > 50 else db_url,
+                        "connection_test": "success",
+                        "is_postgres": auth_service.db.is_postgres
+                    }
+            except Exception as e:
+                print(f"❌ [DB-INFO] Database connection test failed: {str(e)}")
+                return {
+                    "database_type": db_type,
+                    "connection_test": "failed",
+                    "error": str(e)
+                }
+        else:
+            return {"error": "Auth service not initialized properly"}
+    except Exception as e:
+        print(f"❌ [DB-INFO] Database info check failed: {str(e)}")
+        return {"error": str(e)}
 
 
 class DatabaseManager:
@@ -1179,12 +1234,68 @@ async def get_multimedia_sources():
         "claude_available": multimedia_processor.has_claude if multimedia_processor else False
     }
 
+@app.get("/api/migrate-neon")
+async def migrate_neon_database():
+    """Initialize and setup Neon Postgres database"""
+    if not auth_service:
+        raise HTTPException(status_code=500, detail="Auth service not initialized")
+    
+    if not auth_service.db.is_postgres:
+        raise HTTPException(status_code=400, detail="Migration endpoint only works with PostgreSQL")
+    
+    try:
+        # Test database connection
+        with auth_service.db.get_connection() as conn:
+            pass
+        
+        # Get topics to verify setup
+        topics = auth_service.get_available_topics()
+        
+        # Get category statistics
+        categories = {}
+        for topic in topics:
+            cat = topic.category.value
+            categories[cat] = categories.get(cat, 0) + 1
+        
+        # Check table counts
+        table_counts = {}
+        tables_to_check = ['users', 'ai_topics', 'articles', 'audio_content', 'video_content', 'daily_archives']
+        for table in tables_to_check:
+            try:
+                result = auth_service.db.execute_query(f"SELECT COUNT(*) as count FROM {table}")
+                table_counts[table] = result[0]['count']
+            except Exception as e:
+                table_counts[table] = f"Error: {str(e)}"
+        
+        return {
+            "success": True,
+            "message": "Neon Postgres database initialized successfully",
+            "database_type": "PostgreSQL",
+            "database_url": auth_service.db.database_url[:50] + "...",
+            "topics_count": len(topics),
+            "categories": categories,
+            "table_counts": table_counts,
+            "sample_topics": [{"name": t.name, "category": t.category.value} for t in topics[:5]]
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Migration failed: {str(e)}")
+
 @app.get("/api/health")
 async def health_check():
     """Health check"""
+    # Get database info from auth service
+    db_info = {}
+    if auth_service and hasattr(auth_service, 'db'):
+        db_info = {
+            "database_type": "PostgreSQL" if auth_service.db.is_postgres else "SQLite",
+            "database_url": auth_service.db.database_url if not auth_service.db.is_postgres else "[PostgreSQL connection]"
+        }
+    
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
+        "database_info": db_info,
         "components": {
             "database": db_manager is not None,
             "scraper": scraper is not None,
@@ -1192,6 +1303,7 @@ async def health_check():
             "multimedia_database": multimedia_db_manager is not None,
             "multimedia_scraper": multimedia_scraper is not None,
             "multimedia_processor": multimedia_processor is not None,
+            "authentication": auth_service is not None,
             "claude_api": processor.has_claude if processor else False,
             "scheduler": scheduler.running if scheduler else False
         }
