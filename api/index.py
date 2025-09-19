@@ -875,6 +875,26 @@ class AINewsRouter:
             logger.info(f"📊 User existence check: existing={is_existing_user}")
             
             # Insert or update user
+            # Check if users table exists and create if needed with correct schema
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id TEXT PRIMARY KEY,
+                    email TEXT UNIQUE NOT NULL,
+                    name TEXT,
+                    picture TEXT,
+                    verified_email BOOLEAN DEFAULT TRUE,
+                    subscription_tier TEXT DEFAULT 'free',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Add picture column if it doesn't exist (for existing databases)
+            try:
+                cursor.execute("ALTER TABLE users ADD COLUMN picture TEXT")
+            except:
+                pass  # Column already exists
+            
             cursor.execute("""
                 INSERT OR REPLACE INTO users (id, email, name, picture, verified_email, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?)
