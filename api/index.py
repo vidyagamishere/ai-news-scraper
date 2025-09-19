@@ -245,112 +245,186 @@ class AINewsRouter:
         self.auth_service = AuthService()
         self.db_path = "ai_news.db"
         logger.info("🏗️ AINewsRouter initialized with complete authentication and debug logging")
+        
+        # Initialize database schema on startup
+        self.initialize_database()
+    
+    def initialize_database(self):
+        """
+        Centralized database initialization and schema management.
+        This function ensures all tables and schema updates are applied on startup.
+        """
+        try:
+            logger.info("🗄️ Initializing database schema...")
+            
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+            
+            # =================================================================
+            # CORE TABLES CREATION
+            # =================================================================
+            
+            # Articles table - stores scraped news content
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS articles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    summary TEXT,
+                    url TEXT UNIQUE NOT NULL,
+                    source TEXT,
+                    published_date TEXT,
+                    scraped_date TEXT,
+                    category TEXT,
+                    tags TEXT,
+                    significance_score REAL DEFAULT 5.0,
+                    content_hash TEXT,
+                    processing_status TEXT DEFAULT 'pending'
+                )
+            """)
+            
+            # Users table - authentication and user management
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id TEXT PRIMARY KEY,
+                    email TEXT UNIQUE NOT NULL,
+                    name TEXT,
+                    picture TEXT,
+                    verified_email BOOLEAN DEFAULT TRUE,
+                    subscription_tier TEXT DEFAULT 'free',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # User preferences table - personalization and onboarding
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_preferences (
+                    user_id TEXT PRIMARY KEY,
+                    topics TEXT,
+                    newsletter_frequency TEXT DEFAULT 'weekly',
+                    email_notifications BOOLEAN DEFAULT TRUE,
+                    content_types TEXT,
+                    onboarding_completed BOOLEAN DEFAULT FALSE,
+                    newsletter_subscribed BOOLEAN DEFAULT TRUE,
+                    experience_level TEXT,
+                    role_type TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users (id)
+                )
+            """)
+            
+            # Email OTPs table - temporary OTP storage for verification
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS email_otps (
+                    email TEXT PRIMARY KEY,
+                    otp TEXT NOT NULL,
+                    name TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TIMESTAMP NOT NULL
+                )
+            """)
+            
+            # User passwords table - for email/password authentication (optional)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_passwords (
+                    user_id TEXT PRIMARY KEY,
+                    password_hash TEXT NOT NULL,
+                    salt TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users (id)
+                )
+            """)
+            
+            # =================================================================
+            # SCHEMA MIGRATIONS - Handle existing databases
+            # =================================================================
+            
+            # Migration: Add missing columns to users table
+            required_user_columns = [
+                ('verified_email', 'BOOLEAN', True),
+                ('updated_at', 'TIMESTAMP', None),
+                ('picture', 'TEXT', None),
+                ('subscription_tier', 'TEXT', 'free')
+            ]
+            
+            for column_name, column_type, default_value in required_user_columns:
+                try:
+                    cursor.execute(f"SELECT {column_name} FROM users LIMIT 1")
+                except sqlite3.OperationalError:
+                    logger.info(f"📦 Adding {column_name} column to users table")
+                    cursor.execute(f"ALTER TABLE users ADD COLUMN {column_name} {column_type}")
+                    if default_value is not None:
+                        if isinstance(default_value, str):
+                            cursor.execute(f"UPDATE users SET {column_name} = ? WHERE {column_name} IS NULL", (default_value,))
+                        else:
+                            cursor.execute(f"UPDATE users SET {column_name} = {default_value} WHERE {column_name} IS NULL")
+            
+            # Migration: Add missing columns to user_preferences table
+            required_preference_columns = [
+                ('onboarding_completed', 'BOOLEAN', False),
+                ('newsletter_subscribed', 'BOOLEAN', True),
+                ('experience_level', 'TEXT', None),
+                ('role_type', 'TEXT', None),
+                ('content_types', 'TEXT', None)
+            ]
+            
+            for column_name, column_type, default_value in required_preference_columns:
+                try:
+                    cursor.execute(f"SELECT {column_name} FROM user_preferences LIMIT 1")
+                except sqlite3.OperationalError:
+                    logger.info(f"📦 Adding {column_name} column to user_preferences table")
+                    cursor.execute(f"ALTER TABLE user_preferences ADD COLUMN {column_name} {column_type}")
+                    if default_value is not None:
+                        if isinstance(default_value, str):
+                            cursor.execute(f"UPDATE user_preferences SET {column_name} = ? WHERE {column_name} IS NULL", (default_value,))
+                        elif isinstance(default_value, bool):
+                            cursor.execute(f"UPDATE user_preferences SET {column_name} = {1 if default_value else 0} WHERE {column_name} IS NULL")
+            
+            # =================================================================
+            # INDEXES FOR PERFORMANCE
+            # =================================================================
+            
+            # Index on articles for better query performance
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_articles_published_date ON articles(published_date)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_articles_significance ON articles(significance_score)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_articles_source ON articles(source)")
+            
+            # Index on users for authentication
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
+            
+            # Index on OTPs for cleanup and verification
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_email_otps_expires ON email_otps(expires_at)")
+            
+            # =================================================================
+            # CLEANUP OLD DATA
+            # =================================================================
+            
+            # Clean up expired OTPs
+            cursor.execute("DELETE FROM email_otps WHERE expires_at < ?", (datetime.utcnow().isoformat(),))
+            
+            # Commit all changes
+            conn.commit()
+            conn.close()
+            
+            logger.info("✅ Database schema initialization completed successfully")
+            
+        except Exception as e:
+            logger.error(f"❌ Database initialization failed: {str(e)}")
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            raise e
     
     def get_db_connection(self):
         """Get database connection with Railway persistent storage"""
         try:
             logger.info(f"📁 Attempting database connection to: {self.db_path}")
             
-            # Railway has persistent storage, so create actual file database
-            if not os.path.exists(self.db_path):
-                logger.info("📁 Database file not found - creating persistent SQLite database for Railway")
-                conn = sqlite3.connect(self.db_path)
-                conn.row_factory = sqlite3.Row
-                
-                # Create basic schema
-                cursor = conn.cursor()
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS articles (
-                        id INTEGER PRIMARY KEY,
-                        title TEXT,
-                        description TEXT,
-                        content_summary TEXT,
-                        source TEXT,
-                        time TEXT,
-                        impact TEXT DEFAULT 'medium',
-                        type TEXT DEFAULT 'blog',
-                        url TEXT,
-                        read_time TEXT DEFAULT '3 min',
-                        significance_score REAL DEFAULT 5.0,
-                        thumbnail_url TEXT,
-                        audio_url TEXT,
-                        duration INTEGER
-                    )
-                """)
-                
-                # Create users table for persistent authentication
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS users (
-                        id TEXT PRIMARY KEY,
-                        email TEXT UNIQUE NOT NULL,
-                        name TEXT,
-                        picture TEXT,
-                        verified_email BOOLEAN DEFAULT TRUE,
-                        subscription_tier TEXT DEFAULT 'free',
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)
-                
-                # Migrate existing users table to add verified_email column if missing
-                try:
-                    cursor.execute("SELECT verified_email FROM users LIMIT 1")
-                except sqlite3.OperationalError:
-                    # Column doesn't exist, add it
-                    logger.info("Adding verified_email column to users table")
-                    cursor.execute("ALTER TABLE users ADD COLUMN verified_email BOOLEAN DEFAULT TRUE")
-                
-                # Create user_preferences table for onboarding data
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS user_preferences (
-                        user_id TEXT PRIMARY KEY,
-                        topics TEXT,
-                        newsletter_frequency TEXT DEFAULT 'weekly',
-                        email_notifications BOOLEAN DEFAULT TRUE,
-                        content_types TEXT DEFAULT '["blogs", "podcasts", "videos"]',
-                        onboarding_completed BOOLEAN DEFAULT FALSE,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (user_id) REFERENCES users (id)
-                    )
-                """)
-                
-                # Insert sample data for demo
-                sample_articles = [
-                    ("AI Router Architecture Deployed Successfully", 
-                     "New single-function router architecture eliminates Vercel serverless function limits",
-                     "This deployment demonstrates a complete router pattern that can handle unlimited endpoints through a single function.",
-                     "AI News Scraper",
-                     datetime.utcnow().isoformat(),
-                     "high", "blog", "https://example.com/router-success", 9.5),
-                    ("Breaking: OpenAI Announces GPT-5",
-                     "OpenAI has announced the next generation of their language model with enhanced capabilities",
-                     "GPT-5 shows significant improvements in reasoning, coding, and multimodal understanding.",
-                     "OpenAI Blog",
-                     (datetime.utcnow() - timedelta(hours=2)).isoformat(),
-                     "high", "blog", "https://example.com/gpt5-announcement", 9.2),
-                    ("Google Releases Gemini Pro Update",
-                     "Google's latest AI model update brings improved performance and new features",
-                     "The update includes better code generation and enhanced multimodal capabilities.",
-                     "Google AI",
-                     (datetime.utcnow() - timedelta(hours=4)).isoformat(),
-                     "medium", "blog", "https://example.com/gemini-update", 7.8)
-                ]
-                
-                for article in sample_articles:
-                    cursor.execute("""
-                        INSERT INTO articles (title, description, content_summary, source, time, impact, type, url, significance_score)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, article)
-                
-                conn.commit()
-                logger.info(f"✅ Persistent SQLite database created on Railway with {len(sample_articles)} sample articles")
-                return conn
-            else:
-                conn = sqlite3.connect(self.db_path)
-                conn.row_factory = sqlite3.Row
-                logger.info("✅ Connected to existing database file")
-                return conn
+            # Create database connection (schema initialized at startup)
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            logger.info("✅ Connected to database")
+            return conn
                 
         except Exception as e:
             logger.error(f"❌ Database connection failed: {str(e)}")
@@ -1016,25 +1090,9 @@ class AINewsRouter:
             
             logger.info(f"📊 Token data extracted: email={token_data.get('email')}, name={token_data.get('name')}")
             
-            # Create or update user in database
+            # Create or update user in database (schema already initialized at startup)
             conn = self.get_db_connection()
             cursor = conn.cursor()
-            
-            # Check if users table exists, create if not
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
-            if not cursor.fetchone():
-                logger.info("📊 Creating users table")
-                cursor.execute("""
-                    CREATE TABLE users (
-                        id TEXT PRIMARY KEY,
-                        email TEXT UNIQUE,
-                        name TEXT,
-                        picture TEXT,
-                        verified_email BOOLEAN DEFAULT TRUE,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)
             
             # Check if user already exists
             user_id = token_data.get('sub', '')
@@ -1044,28 +1102,8 @@ class AINewsRouter:
             
             logger.info(f"📊 User existence check: existing={is_existing_user}")
             
-            # Insert or update user
-            # First check what columns exist in the users table
-            cursor.execute("PRAGMA table_info(users)")
-            existing_columns = [column[1] for column in cursor.fetchall()]
-            logger.info(f"📊 Existing users table columns: {existing_columns}")
-            
-            if not existing_columns:
-                # Table doesn't exist, create it with full schema
-                cursor.execute("""
-                    CREATE TABLE users (
-                        id TEXT PRIMARY KEY,
-                        email TEXT UNIQUE NOT NULL,
-                        name TEXT,
-                        picture TEXT,
-                        verified_email BOOLEAN DEFAULT TRUE,
-                        subscription_tier TEXT DEFAULT 'free',
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)
-                existing_columns = ['id', 'email', 'name', 'picture', 'verified_email', 'subscription_tier', 'created_at', 'updated_at']
-                logger.info("✅ Created new users table with full schema")
+            # Insert or update user (table schema already initialized)
+            existing_columns = ['id', 'email', 'name', 'picture', 'verified_email', 'subscription_tier', 'created_at', 'updated_at']
             
             # Build INSERT statement based on available columns
             available_data_columns = []
@@ -1107,19 +1145,7 @@ class AINewsRouter:
             
             logger.info(f"✅ User inserted with available columns: {available_data_columns}")
             
-            # Check user preferences and onboarding status (create table if it doesn't exist)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS user_preferences (
-                    user_id TEXT PRIMARY KEY,
-                    topics TEXT DEFAULT '[]',
-                    content_types TEXT DEFAULT '[]',
-                    newsletter_frequency TEXT DEFAULT 'weekly',
-                    email_notifications BOOLEAN DEFAULT TRUE,
-                    onboarding_completed BOOLEAN DEFAULT FALSE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
+            # Check user preferences and onboarding status (table already initialized)
             
             try:
                 cursor.execute("SELECT * FROM user_preferences WHERE user_id = ?", (user_id,))
@@ -1256,14 +1282,7 @@ class AINewsRouter:
                 datetime.utcnow().isoformat()
             ))
             
-            # Store password hash (you might want a separate table for security)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS user_passwords (
-                    user_id TEXT PRIMARY KEY,
-                    password_hash TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
+            # Store password hash (table already initialized at startup)
             cursor.execute("INSERT INTO user_passwords (user_id, password_hash) VALUES (?, ?)", 
                          (user_id, password_hash))
             
@@ -1473,20 +1492,9 @@ class AINewsRouter:
             import random
             otp = str(random.randint(100000, 999999))
             
-            # Store OTP temporarily (in production, use Redis or similar)
+            # Store OTP temporarily (table already initialized at startup)
             conn = self.get_db_connection()
             cursor = conn.cursor()
-            
-            # Create OTP storage table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS email_otps (
-                    email TEXT PRIMARY KEY,
-                    otp TEXT NOT NULL,
-                    name TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    expires_at TIMESTAMP NOT NULL
-                )
-            """)
             
             # Store OTP with 10-minute expiration
             from datetime import timedelta
@@ -1598,50 +1606,9 @@ class AINewsRouter:
                     "status": 400
                 }
             
-            # Verify OTP
+            # Verify OTP (database schema already initialized at startup)
             conn = self.get_db_connection()
             cursor = conn.cursor()
-            
-            # Ensure all required columns exist in users table
-            required_columns = [
-                ('verified_email', 'BOOLEAN', True),
-                ('updated_at', 'TIMESTAMP', None),
-                ('picture', 'TEXT', None),
-                ('subscription_tier', 'TEXT', 'free')
-            ]
-            
-            for column_name, column_type, default_value in required_columns:
-                try:
-                    cursor.execute(f"SELECT {column_name} FROM users LIMIT 1")
-                except sqlite3.OperationalError:
-                    logger.info(f"Adding {column_name} column to users table")
-                    cursor.execute(f"ALTER TABLE users ADD COLUMN {column_name} {column_type}")
-                    if default_value is not None:
-                        # Set default value for existing rows
-                        if isinstance(default_value, str):
-                            cursor.execute(f"UPDATE users SET {column_name} = ? WHERE {column_name} IS NULL", (default_value,))
-                        else:
-                            cursor.execute(f"UPDATE users SET {column_name} = {default_value} WHERE {column_name} IS NULL")
-                    conn.commit()
-            
-            # Ensure user_preferences table exists
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS user_preferences (
-                    user_id TEXT PRIMARY KEY,
-                    topics TEXT,
-                    newsletter_frequency TEXT DEFAULT 'weekly',
-                    email_notifications BOOLEAN DEFAULT TRUE,
-                    content_types TEXT,
-                    onboarding_completed BOOLEAN DEFAULT FALSE,
-                    newsletter_subscribed BOOLEAN DEFAULT TRUE,
-                    experience_level TEXT,
-                    role_type TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (user_id) REFERENCES users (id)
-                )
-            """)
-            conn.commit()
             
             cursor.execute("""
                 SELECT otp, name, expires_at FROM email_otps 
@@ -1971,40 +1938,7 @@ class AINewsRouter:
             conn = self.get_db_connection()
             cursor = conn.cursor()
             
-            # Ensure user_preferences table exists with all columns
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='user_preferences'")
-            if not cursor.fetchone():
-                logger.info("📊 Creating user_preferences table")
-                cursor.execute("""
-                    CREATE TABLE user_preferences (
-                        user_id TEXT PRIMARY KEY,
-                        topics TEXT DEFAULT '[]',
-                        newsletter_frequency TEXT DEFAULT 'weekly',
-                        email_notifications BOOLEAN DEFAULT TRUE,
-                        content_types TEXT DEFAULT '["blogs", "podcasts", "videos"]',
-                        onboarding_completed BOOLEAN DEFAULT FALSE,
-                        newsletter_subscribed BOOLEAN DEFAULT FALSE,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)
-            else:
-                # Check for missing columns and add them
-                cursor.execute("PRAGMA table_info(user_preferences)")
-                existing_columns = [row[1] for row in cursor.fetchall()]
-                
-                required_columns = {
-                    'newsletter_subscribed': 'BOOLEAN DEFAULT FALSE',
-                    'content_types': 'TEXT DEFAULT \'["blogs", "podcasts", "videos"]\'',
-                    'created_at': 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
-                    'updated_at': 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'
-                }
-                
-                for column_name, column_def in required_columns.items():
-                    if column_name not in existing_columns:
-                        logger.info(f"📊 Adding missing column: {column_name}")
-                        cursor.execute(f"ALTER TABLE user_preferences ADD COLUMN {column_name} {column_def}")
-                        conn.commit()
+            # Update preferences (table schema already initialized at startup)
             
             # Get current preferences
             cursor.execute("SELECT * FROM user_preferences WHERE user_id = ?", (user_id,))
