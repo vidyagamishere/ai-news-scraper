@@ -1494,7 +1494,7 @@ class AINewsRouter:
             
             # Send OTP email using existing Brevo service
             try:
-                from .lib.email_service import EmailDigestService
+                from lib.email_service import EmailDigestService
                 email_service = EmailDigestService()
                 
                 # Send OTP email with user data format
