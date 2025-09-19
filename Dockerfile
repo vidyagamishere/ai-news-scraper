@@ -37,6 +37,8 @@ COPY api/ ./api/
 COPY health_check.py .
 COPY requirements.txt .
 COPY .env.production .env
+# Copy existing SQLite database if it exists
+COPY ai_news.db ./ai_news.db
 
 # Create data directory for SQLite database
 RUN mkdir -p /app/data && chown -R appuser:appuser /app
