@@ -292,6 +292,14 @@ class AINewsRouter:
                     )
                 """)
                 
+                # Migrate existing users table to add verified_email column if missing
+                try:
+                    cursor.execute("SELECT verified_email FROM users LIMIT 1")
+                except sqlite3.OperationalError:
+                    # Column doesn't exist, add it
+                    logger.info("Adding verified_email column to users table")
+                    cursor.execute("ALTER TABLE users ADD COLUMN verified_email BOOLEAN DEFAULT TRUE")
+                
                 # Create user_preferences table for onboarding data
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS user_preferences (
@@ -1494,6 +1502,9 @@ class AINewsRouter:
             
             # Send OTP email using existing Brevo service
             try:
+                import sys
+                import os
+                sys.path.append(os.path.dirname(os.path.abspath(__file__)))
                 from lib.email_service import EmailDigestService
                 email_service = EmailDigestService()
                 
