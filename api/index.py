@@ -942,6 +942,10 @@ class AINewsRouter:
             
             if auth_endpoint == "google" and method == "POST":
                 return await self.handle_google_auth(body or {})
+            elif auth_endpoint == "signup" and method == "POST":
+                return await self.handle_auth_signup(body or {})
+            elif auth_endpoint == "login" and method == "POST":
+                return await self.handle_auth_login(body or {})
             elif auth_endpoint == "verify":
                 return await self.handle_auth_verify(headers)
             elif auth_endpoint == "logout" and method == "POST":
@@ -1173,6 +1177,258 @@ class AINewsRouter:
                 "message": f"Authentication failed: {str(e)}",
                 "status": 500,
                 "router_auth": "error",
+                "debug_info": {"traceback": traceback.format_exc()}
+            }
+    
+    async def handle_auth_signup(self, data: Dict) -> Dict[str, Any]:
+        """Handle user signup with email/password"""
+        try:
+            logger.info("🔐 Processing user signup request")
+            logger.info(f"📊 Signup data keys: {list(data.keys())}")
+            
+            # Validate required fields
+            email = data.get('email', '').strip().lower()
+            password = data.get('password', '')
+            name = data.get('name', '').strip()
+            
+            if not email or not password or not name:
+                return {
+                    "success": False,
+                    "message": "Email, password, and name are required",
+                    "status": 400
+                }
+            
+            # Basic email validation
+            if '@' not in email or '.' not in email:
+                return {
+                    "success": False,
+                    "message": "Please enter a valid email address",
+                    "status": 400
+                }
+            
+            # Password strength validation
+            if len(password) < 6:
+                return {
+                    "success": False,
+                    "message": "Password must be at least 6 characters long",
+                    "status": 400
+                }
+            
+            # Create user in database
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+            
+            # Check if user already exists
+            cursor.execute("SELECT id FROM users WHERE email = ?", (email,))
+            if cursor.fetchone():
+                conn.close()
+                return {
+                    "success": False,
+                    "message": "An account with this email already exists",
+                    "status": 409
+                }
+            
+            # Generate user ID and hash password
+            import uuid
+            import hashlib
+            user_id = str(uuid.uuid4())
+            password_hash = hashlib.sha256(password.encode()).hexdigest()
+            
+            # Insert new user
+            cursor.execute("""
+                INSERT INTO users (id, email, name, verified_email, subscription_tier, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                user_id, email, name, False, 'free',
+                datetime.utcnow().isoformat(),
+                datetime.utcnow().isoformat()
+            ))
+            
+            # Store password hash (you might want a separate table for security)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_passwords (
+                    user_id TEXT PRIMARY KEY,
+                    password_hash TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("INSERT INTO user_passwords (user_id, password_hash) VALUES (?, ?)", 
+                         (user_id, password_hash))
+            
+            # Create default preferences
+            cursor.execute("""
+                INSERT INTO user_preferences (
+                    user_id, topics, content_types, newsletter_frequency, 
+                    email_notifications, onboarding_completed
+                ) VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                user_id, '[]', '["blogs", "podcasts", "videos"]', 'weekly', True, False
+            ))
+            
+            conn.commit()
+            conn.close()
+            
+            # Create JWT token
+            token_data = {
+                'sub': user_id,
+                'email': email,
+                'name': name,
+                'picture': '',
+                'iat': int(datetime.utcnow().timestamp()),
+                'exp': int((datetime.utcnow() + timedelta(hours=24)).timestamp())
+            }
+            jwt_token = self.auth_service.create_jwt_token(token_data)
+            
+            logger.info(f"✅ User signup successful: {email}")
+            return {
+                "success": True,
+                "message": "Account created successfully",
+                "token": jwt_token,
+                "user": {
+                    "id": user_id,
+                    "email": email,
+                    "name": name,
+                    "picture": "",
+                    "verified_email": False,
+                    "subscription_tier": "free",
+                    "preferences": {
+                        "topics": [],
+                        "content_types": ["blogs", "podcasts", "videos"],
+                        "newsletter_frequency": "weekly",
+                        "email_notifications": True,
+                        "onboarding_completed": False
+                    }
+                },
+                "isUserExist": False,
+                "expires_in": 86400,
+                "router_auth": True,
+                "debug_info": {
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "user_created": True
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Signup failed: {str(e)}")
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            return {
+                "success": False,
+                "message": f"Signup failed: {str(e)}",
+                "status": 500,
+                "debug_info": {"traceback": traceback.format_exc()}
+            }
+    
+    async def handle_auth_login(self, data: Dict) -> Dict[str, Any]:
+        """Handle user login with email/password"""
+        try:
+            logger.info("🔐 Processing user login request")
+            logger.info(f"📊 Login data keys: {list(data.keys())}")
+            
+            # Validate required fields
+            email = data.get('email', '').strip().lower()
+            password = data.get('password', '')
+            
+            if not email or not password:
+                return {
+                    "success": False,
+                    "message": "Email and password are required",
+                    "status": 400
+                }
+            
+            # Authenticate user
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+            
+            # Get user data
+            cursor.execute("SELECT * FROM users WHERE email = ?", (email,))
+            user_row = cursor.fetchone()
+            
+            if not user_row:
+                conn.close()
+                return {
+                    "success": False,
+                    "message": "Invalid email or password",
+                    "status": 401
+                }
+            
+            # Verify password
+            cursor.execute("SELECT password_hash FROM user_passwords WHERE user_id = ?", (user_row['id'],))
+            password_row = cursor.fetchone()
+            
+            if not password_row:
+                conn.close()
+                return {
+                    "success": False,
+                    "message": "Invalid email or password",
+                    "status": 401
+                }
+            
+            import hashlib
+            provided_hash = hashlib.sha256(password.encode()).hexdigest()
+            
+            if provided_hash != password_row['password_hash']:
+                conn.close()
+                return {
+                    "success": False,
+                    "message": "Invalid email or password",
+                    "status": 401
+                }
+            
+            # Get user preferences
+            cursor.execute("SELECT * FROM user_preferences WHERE user_id = ?", (user_row['id'],))
+            prefs_row = cursor.fetchone()
+            
+            preferences = {
+                "topics": json.loads(prefs_row['topics']) if prefs_row and prefs_row['topics'] else [],
+                "content_types": json.loads(prefs_row['content_types']) if prefs_row and prefs_row['content_types'] else ["blogs", "podcasts", "videos"],
+                "newsletter_frequency": prefs_row['newsletter_frequency'] if prefs_row else "weekly",
+                "email_notifications": bool(prefs_row['email_notifications']) if prefs_row else True,
+                "onboarding_completed": bool(prefs_row['onboarding_completed']) if prefs_row else False
+            }
+            
+            conn.close()
+            
+            # Create JWT token
+            token_data = {
+                'sub': user_row['id'],
+                'email': user_row['email'],
+                'name': user_row['name'],
+                'picture': user_row['picture'] or '',
+                'iat': int(datetime.utcnow().timestamp()),
+                'exp': int((datetime.utcnow() + timedelta(hours=24)).timestamp())
+            }
+            jwt_token = self.auth_service.create_jwt_token(token_data)
+            
+            logger.info(f"✅ User login successful: {email}")
+            return {
+                "success": True,
+                "message": "Authentication successful",
+                "token": jwt_token,
+                "user": {
+                    "id": user_row['id'],
+                    "email": user_row['email'],
+                    "name": user_row['name'],
+                    "picture": user_row['picture'] or "",
+                    "verified_email": bool(user_row['verified_email']) if 'verified_email' in user_row.keys() else False,
+                    "subscription_tier": "free",
+                    "preferences": preferences
+                },
+                "isUserExist": True,
+                "expires_in": 86400,
+                "router_auth": True,
+                "debug_info": {
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "user_authenticated": True
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Login failed: {str(e)}")
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            return {
+                "success": False,
+                "message": f"Login failed: {str(e)}",
+                "status": 500,
                 "debug_info": {"traceback": traceback.format_exc()}
             }
     
