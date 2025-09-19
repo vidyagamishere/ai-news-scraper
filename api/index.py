@@ -1502,18 +1502,31 @@ class AINewsRouter:
             
             # Send OTP email using existing Brevo service
             try:
-                import sys
-                import os
-                sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-                from lib.email_service import EmailDigestService
-                email_service = EmailDigestService()
+                # Import email service - try multiple paths
+                email_service = None
+                try:
+                    from lib.email_service import EmailDigestService
+                    email_service = EmailDigestService()
+                except ImportError:
+                    try:
+                        import sys
+                        import os
+                        sys.path.append(os.path.join(os.path.dirname(__file__), 'lib'))
+                        from email_service import EmailDigestService
+                        email_service = EmailDigestService()
+                    except ImportError:
+                        logger.warning("Could not import EmailDigestService")
+                        email_service = None
                 
-                # Send OTP email with user data format
-                user_data = {
-                    "email": email,
-                    "name": name or "AI Enthusiast"
-                }
-                email_sent = await email_service.send_otp_email(user_data, otp)
+                if email_service:
+                    # Send OTP email with user data format
+                    user_data = {
+                        "email": email,
+                        "name": name or "AI Enthusiast"
+                    }
+                    email_sent = await email_service.send_otp_email(user_data, otp)
+                else:
+                    email_sent = False
                 
                 if email_sent:
                     logger.info(f"📧 OTP email sent successfully to {email}")
