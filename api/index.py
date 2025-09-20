@@ -1510,46 +1510,51 @@ class AINewsRouter:
             
             # Send OTP email using existing Brevo service
             try:
-                # Import email service with proper path handling
+                # Import email service with proper path handling for Railway
                 email_service = None
+                
+                # Check what files actually exist in deployment
+                import sys
+                import os
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                logger.info(f"📂 Current directory: {current_dir}")
+                logger.info(f"📂 Files in current dir: {os.listdir(current_dir) if os.path.exists(current_dir) else 'Dir not found'}")
+                
+                # Check lib directory
+                lib_dir = os.path.join(current_dir, 'lib')
+                logger.info(f"📂 Lib directory: {lib_dir}")
+                logger.info(f"📂 Lib dir exists: {os.path.exists(lib_dir)}")
+                if os.path.exists(lib_dir):
+                    logger.info(f"📂 Files in lib dir: {os.listdir(lib_dir)}")
+                
+                # Check parent directory structure
+                parent_dir = os.path.dirname(current_dir)
+                logger.info(f"📂 Parent directory: {parent_dir}")
+                if os.path.exists(parent_dir):
+                    logger.info(f"📂 Files in parent dir: {os.listdir(parent_dir)}")
+                
                 try:
-                    # Try direct import first
-                    from lib.email_service import EmailDigestService
-                    email_service = EmailDigestService()
-                    logger.info("📧 EmailDigestService imported successfully")
-                except ImportError as e1:
-                    logger.warning(f"Direct import failed: {e1}")
-                    try:
-                        # Try with sys.path manipulation
-                        import sys
-                        import os
-                        api_dir = os.path.dirname(os.path.abspath(__file__))
-                        lib_path = os.path.join(api_dir, 'lib')
+                    # Try absolute import with Railway-style path
+                    if os.path.exists(os.path.join(current_dir, 'lib', 'email_service.py')):
+                        # Add lib to sys.path
+                        lib_path = os.path.join(current_dir, 'lib')
                         if lib_path not in sys.path:
                             sys.path.insert(0, lib_path)
-                        from email_service import EmailDigestService
+                        
+                        # Import the module
+                        import email_service
+                        email_service_module = email_service
+                        
+                        # Get the class
+                        EmailDigestService = email_service_module.EmailDigestService
                         email_service = EmailDigestService()
-                        logger.info("📧 EmailDigestService imported with path manipulation")
-                    except ImportError as e2:
-                        logger.warning(f"Path manipulation import failed: {e2}")
-                        try:
-                            # Try with explicit module path
-                            import importlib.util
-                            spec = importlib.util.spec_from_file_location(
-                                "email_service", 
-                                os.path.join(api_dir, 'lib', 'email_service.py')
-                            )
-                            if spec and spec.loader:
-                                email_module = importlib.util.module_from_spec(spec)
-                                spec.loader.exec_module(email_module)
-                                EmailDigestService = email_module.EmailDigestService
-                                email_service = EmailDigestService()
-                                logger.info("📧 EmailDigestService imported with importlib")
-                            else:
-                                email_service = None
-                        except Exception as e3:
-                            logger.warning(f"All import attempts failed: {e3}")
-                            email_service = None
+                        logger.info("📧 EmailDigestService imported successfully via absolute path")
+                    else:
+                        logger.error(f"📧 email_service.py not found at {os.path.join(current_dir, 'lib', 'email_service.py')}")
+                        email_service = None
+                except Exception as e3:
+                    logger.warning(f"All import attempts failed: {e3}")
+                    email_service = None
                 
                 if email_service:
                     # Send OTP email with user data format
