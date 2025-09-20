@@ -1838,86 +1838,145 @@ Vidyagam • Connecting AI Innovation
                     "isUserExist": True
                 }
             
-            # Create user account
+            # Create user account (or handle existing user gracefully)
             import uuid
             user_id = str(uuid.uuid4())
             name = otp_record['name'] or user_data.get('name', email.split('@')[0])
             password = user_data.get('password', '')  # Optional password for future logins
             
-            # Insert new user
-            cursor.execute("""
-                INSERT INTO users (id, email, name, verified_email, subscription_tier, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (
-                user_id, email, name, True, 'free',
-                datetime.utcnow().isoformat(),
-                datetime.utcnow().isoformat()
-            ))
+            try:
+                # Insert new user
+                cursor.execute("""
+                    INSERT INTO users (id, email, name, verified_email, subscription_tier, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    user_id, email, name, True, 'free',
+                    datetime.utcnow().isoformat(),
+                    datetime.utcnow().isoformat()
+                ))
+                logger.info(f"✅ New user created: {email}")
+                
+            except Exception as insert_error:
+                # If user already exists, handle gracefully
+                if "UNIQUE constraint failed" in str(insert_error) or "already exists" in str(insert_error).lower():
+                    logger.info(f"📧 User {email} already exists, treating as existing user login")
+                    
+                    # Get existing user data
+                    cursor.execute("SELECT id, email, name, verified_email, subscription_tier FROM users WHERE email = ?", (email,))
+                    existing_user = cursor.fetchone()
+                    
+                    if existing_user:
+                        # Get user preferences for existing user
+                        cursor.execute("SELECT * FROM user_preferences WHERE user_id = ?", (existing_user[0],))
+                        prefs_row = cursor.fetchone()
+                        
+                        user_data_response = {
+                            "id": existing_user[0],
+                            "email": existing_user[1], 
+                            "name": existing_user[2],
+                            "verified_email": existing_user[3],
+                            "subscription_tier": existing_user[4] or 'free',
+                            "preferences": {
+                                "topics": json.loads(prefs_row[1]) if prefs_row and prefs_row[1] else [],
+                                "content_types": json.loads(prefs_row[4]) if prefs_row and prefs_row[4] else ["blogs", "podcasts", "videos"],
+                                "newsletter_frequency": prefs_row[2] if prefs_row else 'weekly',
+                                "email_notifications": prefs_row[3] if prefs_row else True,
+                                "onboarding_completed": prefs_row[5] if prefs_row else False
+                            }
+                        }
+                        
+                        # Create JWT token for existing user
+                        token_data = {
+                            "sub": existing_user[0],  # Use 'sub' field consistently
+                            "email": existing_user[1],
+                            "name": existing_user[2],
+                            "picture": "",
+                            "iat": int(datetime.utcnow().timestamp()),
+                            "exp": int((datetime.utcnow() + timedelta(days=7)).timestamp())
+                        }
+                        jwt_token = self.auth_service.create_jwt_token(token_data)
+                        
+                        # Delete used OTP
+                        cursor.execute("DELETE FROM email_otps WHERE email = ?", (email,))
+                        conn.commit()
+                        conn.close()
+                        
+                        logger.info(f"✅ Existing user {email} logged in via OTP during registration attempt")
+                        return {
+                            "success": True,
+                            "message": "Login successful",
+                            "user": user_data_response,
+                            "token": jwt_token,
+                            "isUserExist": True
+                        }
+                else:
+                    # Some other database error
+                    raise insert_error
             
-            # If password provided, store it for future password-based logins
-            if password and len(password) >= 6:
-                import hashlib
-                password_hash = hashlib.sha256(password.encode()).hexdigest()
-                cursor.execute("INSERT INTO user_passwords (user_id, password_hash) VALUES (?, ?)", 
-                             (user_id, password_hash))
-                logger.info(f"✅ Password stored for user {email} for future logins")
-            
-            # Create default preferences with onboarding not completed
-            cursor.execute("""
-                INSERT INTO user_preferences (
-                    user_id, topics, content_types, newsletter_frequency, 
-                    email_notifications, onboarding_completed
-                ) VALUES (?, ?, ?, ?, ?, ?)
-            """, (
-                user_id, '[]', '["blogs", "podcasts", "videos"]', 'weekly', True, False
-            ))
-            
-            # Delete used OTP
-            cursor.execute("DELETE FROM email_otps WHERE email = ?", (email,))
-            
-            conn.commit()
-            conn.close()
-            
-            # Create JWT token
-            token_data = {
-                'sub': user_id,
-                'email': email,
-                'name': name,
-                'picture': '',
-                'iat': int(datetime.utcnow().timestamp()),
-                'exp': int((datetime.utcnow() + timedelta(hours=24)).timestamp())
-            }
-            jwt_token = self.auth_service.create_jwt_token(token_data)
-            
-            logger.info(f"✅ OTP verification and user creation successful: {email}")
-            return {
-                "success": True,
-                "message": "Account created successfully",
-                "token": jwt_token,
-                "user": {
-                    "id": user_id,
-                    "email": email,
-                    "name": name,
-                    "picture": "",
-                    "verified_email": True,
-                    "subscription_tier": "free",
-                    "preferences": {
-                        "topics": [],
-                        "content_types": ["blogs", "podcasts", "videos"],
-                        "newsletter_frequency": "weekly",
-                        "email_notifications": True,
-                        "onboarding_completed": False
-                    }
-                },
-                "isUserExist": False,
-                "expires_in": 86400,
-                "router_auth": True,
-                "debug_info": {
-                    "timestamp": datetime.utcnow().isoformat(),
-                    "user_created": True,
-                    "email_verified": True
+                # If password provided, store it for future password-based logins
+                if password and len(password) >= 6:
+                    import hashlib
+                    password_hash = hashlib.sha256(password.encode()).hexdigest()
+                    cursor.execute("INSERT INTO user_passwords (user_id, password_hash) VALUES (?, ?)", 
+                                 (user_id, password_hash))
+                    logger.info(f"✅ Password stored for user {email} for future logins")
+                
+                # Create default preferences with onboarding not completed
+                cursor.execute("""
+                    INSERT INTO user_preferences (
+                        user_id, topics, content_types, newsletter_frequency, 
+                        email_notifications, onboarding_completed
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                """, (
+                    user_id, '[]', '["blogs", "podcasts", "videos"]', 'weekly', True, False
+                ))
+                
+                # Delete used OTP
+                cursor.execute("DELETE FROM email_otps WHERE email = ?", (email,))
+                
+                conn.commit()
+                conn.close()
+                
+                # Create JWT token for new user
+                token_data = {
+                    'sub': user_id,
+                    'email': email,
+                    'name': name,
+                    'picture': '',
+                    'iat': int(datetime.utcnow().timestamp()),
+                    'exp': int((datetime.utcnow() + timedelta(hours=24)).timestamp())
                 }
-            }
+                jwt_token = self.auth_service.create_jwt_token(token_data)
+                
+                logger.info(f"✅ OTP verification and user creation successful: {email}")
+                return {
+                    "success": True,
+                    "message": "Account created successfully",
+                    "token": jwt_token,
+                    "user": {
+                        "id": user_id,
+                        "email": email,
+                        "name": name,
+                        "picture": "",
+                        "verified_email": True,
+                        "subscription_tier": "free",
+                        "preferences": {
+                            "topics": [],
+                            "content_types": ["blogs", "podcasts", "videos"],
+                            "newsletter_frequency": "weekly",
+                            "email_notifications": True,
+                            "onboarding_completed": False
+                        }
+                    },
+                    "isUserExist": False,
+                    "expires_in": 86400,
+                    "router_auth": True,
+                    "debug_info": {
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "user_created": True,
+                        "email_verified": True
+                    }
+                }
             
         except Exception as e:
             logger.error(f"❌ OTP verification failed: {str(e)}")
