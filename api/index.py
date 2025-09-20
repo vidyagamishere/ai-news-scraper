@@ -1759,6 +1759,7 @@ Vidyagam • Connecting AI Innovation
             import uuid
             user_id = str(uuid.uuid4())
             name = otp_record['name'] or user_data.get('name', email.split('@')[0])
+            password = user_data.get('password', '')  # Optional password for future logins
             
             # Insert new user
             cursor.execute("""
@@ -1769,6 +1770,14 @@ Vidyagam • Connecting AI Innovation
                 datetime.utcnow().isoformat(),
                 datetime.utcnow().isoformat()
             ))
+            
+            # If password provided, store it for future password-based logins
+            if password and len(password) >= 6:
+                import hashlib
+                password_hash = hashlib.sha256(password.encode()).hexdigest()
+                cursor.execute("INSERT INTO user_passwords (user_id, password_hash) VALUES (?, ?)", 
+                             (user_id, password_hash))
+                logger.info(f"✅ Password stored for user {email} for future logins")
             
             # Create default preferences with onboarding not completed
             cursor.execute("""
