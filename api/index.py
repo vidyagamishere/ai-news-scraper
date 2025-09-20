@@ -1540,10 +1540,11 @@ class AINewsRouter:
             cursor.execute("SELECT id, email, name FROM users WHERE email = ?", (email,))
             existing_user = cursor.fetchone()
             
-            # Enforce proper authentication flows
+            # For OTP-only authentication, be more flexible with auth modes
+            # Still enforce signup restrictions for truly new signups, but allow OTP for existing users
             if auth_mode == 'signup' and existing_user:
                 # User is trying to sign up but email already exists
-                logger.info(f"📧 Signup attempted with existing email: {email}")
+                logger.info(f"📧 Signup attempted with existing email: {email} - redirecting to signin flow")
                 conn.close()
                 return {
                     "success": False,
@@ -1553,15 +1554,16 @@ class AINewsRouter:
                     "redirect_to_signin": True
                 }
             
+            # For signin mode, if user doesn't exist, it might be a new user trying to get access
+            # In OTP-only flow, we can be more permissive and suggest signup
             if auth_mode == 'signin' and not existing_user:
-                # User is trying to sign in but no account exists
-                logger.info(f"📧 Signin attempted with non-existent email: {email}")
+                logger.info(f"📧 Signin attempted with non-existent email: {email} - suggesting signup")
                 conn.close()
                 return {
                     "success": False,
                     "message": "No account found with this email. Please sign up first.",
                     "status": 400,
-                    "error_code": "EMAIL_NOT_FOUND",
+                    "error_code": "EMAIL_NOT_FOUND", 
                     "redirect_to_signup": True
                 }
             
