@@ -1774,16 +1774,53 @@ Vidyagam • Connecting AI Innovation
                 }
             
             # Check if user already exists
-            cursor.execute("SELECT id FROM users WHERE email = ?", (email,))
-            if cursor.fetchone():
+            cursor.execute("SELECT id, email, name, verified_email, subscription_tier FROM users WHERE email = ?", (email,))
+            existing_user = cursor.fetchone()
+            
+            if existing_user:
+                # User exists - log them in instead of creating new account
+                logger.info(f"✅ Existing user found for {email} - logging in")
+                
+                # Get user preferences
+                cursor.execute("SELECT * FROM user_preferences WHERE user_id = ?", (existing_user[0],))
+                prefs_row = cursor.fetchone()
+                
+                user_data_response = {
+                    "id": existing_user[0],
+                    "email": existing_user[1], 
+                    "name": existing_user[2],
+                    "verified_email": existing_user[3],
+                    "subscription_tier": existing_user[4] or 'free',
+                    "preferences": {
+                        "topics": json.loads(prefs_row[2]) if prefs_row and prefs_row[2] else [],
+                        "content_types": json.loads(prefs_row[3]) if prefs_row and prefs_row[3] else ["blogs", "podcasts", "videos"],
+                        "newsletter_frequency": prefs_row[4] if prefs_row else 'weekly',
+                        "email_notifications": prefs_row[5] if prefs_row else True,
+                        "onboarding_completed": prefs_row[6] if prefs_row else False
+                    }
+                }
+                
+                # Create JWT token for existing user
+                token_data = {
+                    "user_id": existing_user[0],
+                    "email": existing_user[1],
+                    "name": existing_user[2],
+                    "exp": (datetime.utcnow() + timedelta(days=7)).timestamp()
+                }
+                jwt_token = self.auth_service.create_jwt_token(token_data)
+                
                 # Delete used OTP
                 cursor.execute("DELETE FROM email_otps WHERE email = ?", (email,))
                 conn.commit()
                 conn.close()
+                
+                logger.info(f"✅ Existing user {email} logged in successfully via OTP")
                 return {
-                    "success": False,
-                    "message": "An account with this email already exists",
-                    "status": 409
+                    "success": True,
+                    "message": "Login successful",
+                    "user": user_data_response,
+                    "token": jwt_token,
+                    "isUserExist": True
                 }
             
             # Create user account
