@@ -1932,8 +1932,8 @@ Vidyagam • Connecting AI Innovation
                         "topics": json.loads(prefs_row[1]) if prefs_row and prefs_row[1] else [],
                         "content_types": json.loads(prefs_row[4]) if prefs_row and prefs_row[4] else ["blogs", "podcasts", "videos"],
                         "newsletter_frequency": prefs_row[2] if prefs_row else 'weekly',
-                        "email_notifications": prefs_row[3] if prefs_row else True,
-                        "onboarding_completed": prefs_row[5] if prefs_row else False
+                        "email_notifications": bool(prefs_row[3]) if prefs_row else True,
+                        "onboarding_completed": bool(prefs_row[5]) if prefs_row else False
                     }
                 }
                 
@@ -2004,8 +2004,8 @@ Vidyagam • Connecting AI Innovation
                                 "topics": json.loads(prefs_row[1]) if prefs_row and prefs_row[1] else [],
                                 "content_types": json.loads(prefs_row[4]) if prefs_row and prefs_row[4] else ["blogs", "podcasts", "videos"],
                                 "newsletter_frequency": prefs_row[2] if prefs_row else 'weekly',
-                                "email_notifications": prefs_row[3] if prefs_row else True,
-                                "onboarding_completed": prefs_row[5] if prefs_row else False
+                                "email_notifications": bool(prefs_row[3]) if prefs_row else True,
+                                "onboarding_completed": bool(prefs_row[5]) if prefs_row else False
                             }
                         }
                         
