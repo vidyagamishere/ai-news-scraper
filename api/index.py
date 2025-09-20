@@ -1390,8 +1390,9 @@ class AINewsRouter:
                 conn.close()
                 return {
                     "success": False,
-                    "message": "Invalid email or password",
-                    "status": 401
+                    "message": "This account uses email verification. Please use 'Continue with Email' instead.",
+                    "status": 401,
+                    "error_type": "otp_user_detected"
                 }
             
             import hashlib
