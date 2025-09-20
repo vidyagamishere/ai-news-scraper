@@ -1547,18 +1547,10 @@ class AINewsRouter:
                 conn.close()
                 return {
                     "success": False,
-                    "message": "Email already exists! This email is already registered with an account. Please sign in using your configured password or request an OTP for this existing email. If you want to create a new account, please use a different email address.",
+                    "message": "Email ID already registered! Please use a different email for sign up.",
                     "status": 400,
                     "error_code": "EMAIL_EXISTS",
-                    "redirect_to_signin": True,
-                    "detailed_instructions": {
-                        "existing_user_options": [
-                            "Sign in with your password",
-                            "Sign in using OTP verification", 
-                            "Use a different email for new account"
-                        ],
-                        "signin_url": "/auth?mode=signin"
-                    }
+                    "redirect_to_signin": True
                 }
             
             if auth_mode == 'signin' and not existing_user:
@@ -1567,18 +1559,10 @@ class AINewsRouter:
                 conn.close()
                 return {
                     "success": False,
-                    "message": "No account found! This email is not registered with any account. Please sign up to create a new account with this email, or check if you're using the correct email address for an existing account.",
+                    "message": "No account found with this email. Please sign up first.",
                     "status": 400,
                     "error_code": "EMAIL_NOT_FOUND",
-                    "redirect_to_signup": True,
-                    "detailed_instructions": {
-                        "new_user_options": [
-                            "Sign up to create a new account",
-                            "Check if you're using the correct email", 
-                            "Try a different email if you have multiple accounts"
-                        ],
-                        "signup_url": "/auth?mode=signup"
-                    }
+                    "redirect_to_signup": True
                 }
             
             # Generate 6-digit OTP
