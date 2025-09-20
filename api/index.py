@@ -1517,6 +1517,7 @@ class AINewsRouter:
             # Validate required fields
             email = data.get('email', '').strip().lower()
             name = data.get('name', '').strip()
+            auth_mode = data.get('auth_mode', 'signin').lower()  # 'signin' or 'signup'
             
             if not email:
                 return {
@@ -1533,13 +1534,43 @@ class AINewsRouter:
                     "status": 400
                 }
             
+            # Check if user exists
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, email, name FROM users WHERE email = ?", (email,))
+            existing_user = cursor.fetchone()
+            
+            # Enforce proper authentication flows
+            if auth_mode == 'signup' and existing_user:
+                # User is trying to sign up but email already exists
+                logger.info(f"📧 Signup attempted with existing email: {email}")
+                conn.close()
+                return {
+                    "success": False,
+                    "message": "An account with this email already exists. Please sign in instead.",
+                    "status": 400,
+                    "error_code": "EMAIL_EXISTS",
+                    "redirect_to_signin": True
+                }
+            
+            if auth_mode == 'signin' and not existing_user:
+                # User is trying to sign in but no account exists
+                logger.info(f"📧 Signin attempted with non-existent email: {email}")
+                conn.close()
+                return {
+                    "success": False,
+                    "message": "No account found with this email. Please sign up first.",
+                    "status": 400,
+                    "error_code": "EMAIL_NOT_FOUND",
+                    "redirect_to_signup": True
+                }
+            
             # Generate 6-digit OTP
             import random
             otp = str(random.randint(100000, 999999))
             
             # Store OTP temporarily (table already initialized at startup)
-            conn = self.get_db_connection()
-            cursor = conn.cursor()
+            # Reuse the same connection
             
             # Store OTP with 10-minute expiration
             from datetime import timedelta
