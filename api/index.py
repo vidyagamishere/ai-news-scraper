@@ -489,6 +489,9 @@ class AINewsRouter:
             elif endpoint == "reset-database":
                 logger.info("🗑️ Routing to database reset handler")
                 return await self.handle_reset_database()
+            elif endpoint == "fix-onboarding":
+                logger.info("🔧 Routing to onboarding fix handler")
+                return await self.handle_fix_onboarding()
             elif endpoint == "content-types":
                 logger.info("📂 Routing to content-types handler")
                 return await self.handle_content_types()
@@ -916,6 +919,79 @@ class AINewsRouter:
             return {
                 "success": False,
                 "message": f"Database reset failed: {str(e)}",
+                "timestamp": datetime.utcnow().isoformat(),
+                "debug_info": {
+                    "traceback": traceback.format_exc()
+                }
+            }
+    
+    async def handle_fix_onboarding(self) -> Dict[str, Any]:
+        """Fix onboarding status for existing users who have completed signup"""
+        try:
+            logger.info("🔧 Processing onboarding status fix")
+            
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+            
+            # Find users who have accounts but onboarding_completed = 0/false
+            cursor.execute("""
+                SELECT u.id, u.email, u.name, p.onboarding_completed 
+                FROM users u 
+                LEFT JOIN user_preferences p ON u.id = p.user_id 
+                WHERE p.onboarding_completed = 0 OR p.onboarding_completed IS NULL
+            """)
+            
+            users_to_fix = cursor.fetchall()
+            fixed_count = 0
+            
+            for user in users_to_fix:
+                user_id, email, name, current_status = user
+                logger.info(f"🔧 Fixing onboarding status for user: {email}")
+                
+                # Update onboarding_completed to 1 (true) for existing users
+                cursor.execute("""
+                    UPDATE user_preferences 
+                    SET onboarding_completed = 1 
+                    WHERE user_id = ?
+                """, (user_id,))
+                
+                # If no preferences record exists, create one
+                if cursor.rowcount == 0:
+                    cursor.execute("""
+                        INSERT INTO user_preferences (
+                            user_id, topics, content_types, newsletter_frequency, 
+                            email_notifications, onboarding_completed
+                        ) VALUES (?, ?, ?, ?, ?, ?)
+                    """, (
+                        user_id, '[]', '["blogs", "podcasts", "videos"]', 'weekly', True, True
+                    ))
+                
+                fixed_count += 1
+            
+            conn.commit()
+            conn.close()
+            
+            fix_response = {
+                "success": True,
+                "message": "Onboarding status fixed for existing users",
+                "users_processed": len(users_to_fix),
+                "users_fixed": fixed_count,
+                "timestamp": datetime.utcnow().isoformat(),
+                "debug_info": {
+                    "operation": "Set onboarding_completed = true for existing users",
+                    "rationale": "Users who created accounts should skip onboarding on subsequent logins"
+                }
+            }
+            
+            logger.info(f"✅ Onboarding status fixed for {fixed_count} users")
+            return fix_response
+            
+        except Exception as e:
+            logger.error(f"❌ Onboarding fix failed: {str(e)}")
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            return {
+                "success": False,
+                "message": f"Onboarding fix failed: {str(e)}",
                 "timestamp": datetime.utcnow().isoformat(),
                 "debug_info": {
                     "traceback": traceback.format_exc()
