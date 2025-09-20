@@ -1765,6 +1765,7 @@ Vidyagam • Connecting AI Innovation
                 }
             
         except Exception as e:
+            import traceback
             logger.error(f"❌ Send OTP failed: {str(e)}")
             logger.error(f"❌ Traceback: {traceback.format_exc()}")
             return {
