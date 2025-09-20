@@ -2037,70 +2037,70 @@ Vidyagam • Connecting AI Innovation
                     # Some other database error
                     raise insert_error
             
-                # If password provided, store it for future password-based logins
-                if password and len(password) >= 6:
-                    import hashlib
-                    password_hash = hashlib.sha256(password.encode()).hexdigest()
-                    cursor.execute("INSERT INTO user_passwords (user_id, password_hash) VALUES (?, ?)", 
-                                 (user_id, password_hash))
-                    logger.info(f"✅ Password stored for user {email} for future logins")
-                
-                # Create default preferences with onboarding not completed
-                cursor.execute("""
-                    INSERT INTO user_preferences (
-                        user_id, topics, content_types, newsletter_frequency, 
-                        email_notifications, onboarding_completed
-                    ) VALUES (?, ?, ?, ?, ?, ?)
-                """, (
-                    user_id, '[]', '["blogs", "podcasts", "videos"]', 'weekly', True, False
-                ))
-                
-                # Delete used OTP
-                cursor.execute("DELETE FROM email_otps WHERE email = ?", (email,))
-                
-                conn.commit()
-                conn.close()
-                
-                # Create JWT token for new user
-                token_data = {
-                    'sub': user_id,
-                    'email': email,
-                    'name': name,
-                    'picture': '',
-                    'iat': int(datetime.utcnow().timestamp()),
-                    'exp': int((datetime.utcnow() + timedelta(hours=24)).timestamp())
-                }
-                jwt_token = self.auth_service.create_jwt_token(token_data)
-                
-                logger.info(f"✅ OTP verification and user creation successful: {email}")
-                return {
-                    "success": True,
-                    "message": "Account created successfully",
-                    "token": jwt_token,
-                    "user": {
-                        "id": user_id,
-                        "email": email,
-                        "name": name,
-                        "picture": "",
-                        "verified_email": True,
-                        "subscription_tier": "free",
-                        "preferences": {
-                            "topics": [],
-                            "content_types": ["blogs", "podcasts", "videos"],
-                            "newsletter_frequency": "weekly",
-                            "email_notifications": True,
-                            "onboarding_completed": False
-                        }
-                    },
-                    "isUserExist": False,
-                    "expires_in": 86400,
-                    "router_auth": True,
-                    "debug_info": {
-                        "timestamp": datetime.utcnow().isoformat(),
-                        "user_created": True,
-                        "email_verified": True
+            # If password provided, store it for future password-based logins
+            if password and len(password) >= 6:
+                import hashlib
+                password_hash = hashlib.sha256(password.encode()).hexdigest()
+                cursor.execute("INSERT INTO user_passwords (user_id, password_hash) VALUES (?, ?)", 
+                             (user_id, password_hash))
+                logger.info(f"✅ Password stored for user {email} for future logins")
+            
+            # Create default preferences with onboarding not completed
+            cursor.execute("""
+                INSERT INTO user_preferences (
+                    user_id, topics, content_types, newsletter_frequency, 
+                    email_notifications, onboarding_completed
+                ) VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                user_id, '[]', '["blogs", "podcasts", "videos"]', 'weekly', True, False
+            ))
+            
+            # Delete used OTP
+            cursor.execute("DELETE FROM email_otps WHERE email = ?", (email,))
+            
+            conn.commit()
+            conn.close()
+            
+            # Create JWT token for new user
+            token_data = {
+                'sub': user_id,
+                'email': email,
+                'name': name,
+                'picture': '',
+                'iat': int(datetime.utcnow().timestamp()),
+                'exp': int((datetime.utcnow() + timedelta(hours=24)).timestamp())
+            }
+            jwt_token = self.auth_service.create_jwt_token(token_data)
+            
+            logger.info(f"✅ OTP verification and user creation successful: {email}")
+            return {
+                "success": True,
+                "message": "Account created successfully",
+                "token": jwt_token,
+                "user": {
+                    "id": user_id,
+                    "email": email,
+                    "name": name,
+                    "picture": "",
+                    "verified_email": True,
+                    "subscription_tier": "free",
+                    "preferences": {
+                        "topics": [],
+                        "content_types": ["blogs", "podcasts", "videos"],
+                        "newsletter_frequency": "weekly",
+                        "email_notifications": True,
+                        "onboarding_completed": False
                     }
+                },
+                "isUserExist": False,
+                "expires_in": 86400,
+                "router_auth": True,
+                "debug_info": {
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "user_created": True,
+                    "email_verified": True
                 }
+            }
             
         except Exception as e:
             logger.error(f"❌ OTP verification failed: {str(e)}")
