@@ -245,9 +245,14 @@ class AINewsRouter:
         self.auth_service = AuthService()
         # Use Railway persistent volume for database storage
         data_dir = os.environ.get('RAILWAY_VOLUME_MOUNT_PATH', '/app/data')
-        if not os.path.exists(data_dir):
-            os.makedirs(data_dir, exist_ok=True)
-            logger.info(f"📁 Created data directory: {data_dir}")
+        try:
+            if not os.path.exists(data_dir):
+                os.makedirs(data_dir, exist_ok=True)
+                logger.info(f"📁 Created data directory: {data_dir}")
+        except Exception as e:
+            logger.warning(f"⚠️ Could not create data directory {data_dir}: {e}")
+            # Fallback to current directory if volume mounting fails
+            data_dir = '/tmp'
         
         self.db_path = os.path.join(data_dir, "ai_news.db")
         logger.info(f"🗄️ Database path: {self.db_path}")
@@ -268,13 +273,16 @@ class AINewsRouter:
         self.initialize_database()
         
         # Log persistence setup for debugging
-        logger.info(f"📊 Database persistence check:")
-        logger.info(f"   📁 Data directory: {data_dir}")
-        logger.info(f"   🗄️ Database file: {self.db_path}")
-        logger.info(f"   ✅ Directory exists: {os.path.exists(data_dir)}")
-        logger.info(f"   ✅ Directory writable: {os.access(data_dir, os.W_OK)}")
-        logger.info(f"   🔒 Volume mount path: {os.environ.get('RAILWAY_VOLUME_MOUNT_PATH', 'not_set')}")
-        logger.info(f"   📈 Database file size: {os.path.getsize(self.db_path) if os.path.exists(self.db_path) else 0} bytes")
+        try:
+            logger.info(f"📊 Database persistence check:")
+            logger.info(f"   📁 Data directory: {data_dir}")
+            logger.info(f"   🗄️ Database file: {self.db_path}")
+            logger.info(f"   ✅ Directory exists: {os.path.exists(data_dir)}")
+            logger.info(f"   ✅ Directory writable: {os.access(data_dir, os.W_OK)}")
+            logger.info(f"   🔒 Volume mount path: {os.environ.get('RAILWAY_VOLUME_MOUNT_PATH', 'not_set')}")
+            logger.info(f"   📈 Database file size: {os.path.getsize(self.db_path) if os.path.exists(self.db_path) else 0} bytes")
+        except Exception as e:
+            logger.error(f"❌ Error in persistence check: {e}")
     
     def initialize_database(self):
         """
