@@ -1268,13 +1268,13 @@ class AINewsRouter:
             except:
                 user_prefs = None
             
-            # For Google auth users, set reasonable defaults and skip onboarding
+            # For Google auth users, set reasonable defaults with fresh onboarding
             preferences = {
                 "topics": [],
                 "newsletter_frequency": "weekly", 
                 "email_notifications": True,
                 "content_types": ["blogs", "podcasts", "videos"],
-                "onboarding_completed": True  # Google users can skip onboarding
+                "onboarding_completed": False  # All users need onboarding after reset
             }
             
             if user_prefs:
@@ -1297,7 +1297,7 @@ class AINewsRouter:
                         email_notifications, onboarding_completed
                     ) VALUES (?, ?, ?, ?, ?, ?)
                 """, (
-                    user_id, '[]', '["blogs", "podcasts", "videos"]', 'weekly', True, True
+                    user_id, '[]', '["blogs", "podcasts", "videos"]', 'weekly', True, False
                 ))
                 logger.info("✅ Default preferences created for Google user")
             
