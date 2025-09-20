@@ -1268,29 +1268,31 @@ class AINewsRouter:
             except:
                 user_prefs = None
             
-            # For Google auth users, set reasonable defaults with fresh onboarding
-            preferences = {
-                "topics": [],
-                "newsletter_frequency": "weekly", 
-                "email_notifications": True,
-                "content_types": ["blogs", "podcasts", "videos"],
-                "onboarding_completed": False  # All users need onboarding after reset
-            }
-            
+            # Set preferences based on whether user exists in database
             if user_prefs:
-                preferences.update({
+                # Existing user - preserve their onboarding status and preferences
+                preferences = {
                     "topics": json.loads(user_prefs['topics']) if user_prefs['topics'] else [],
                     "newsletter_frequency": user_prefs['newsletter_frequency'],
                     "email_notifications": bool(user_prefs['email_notifications']),
                     "content_types": json.loads(user_prefs['content_types']) if user_prefs['content_types'] else ["blogs", "podcasts", "videos"],
                     "onboarding_completed": bool(user_prefs['onboarding_completed'])
-                })
+                }
+            else:
+                # New user - needs to complete onboarding
+                preferences = {
+                    "topics": [],
+                    "newsletter_frequency": "weekly", 
+                    "email_notifications": True,
+                    "content_types": ["blogs", "podcasts", "videos"],
+                    "onboarding_completed": False  # New users need onboarding
+                }
             
             logger.info(f"📊 User preferences loaded: onboarding_completed={preferences['onboarding_completed']}")
             
-            # Create default preferences for Google users if they don't exist
+            # Create default preferences for new Google users
             if not user_prefs:
-                logger.info("📝 Creating default preferences for Google user (new or missing prefs)")
+                logger.info("📝 Creating default preferences for new Google user")
                 cursor.execute("""
                     INSERT OR REPLACE INTO user_preferences (
                         user_id, topics, content_types, newsletter_frequency, 
@@ -1299,7 +1301,7 @@ class AINewsRouter:
                 """, (
                     user_id, '[]', '["blogs", "podcasts", "videos"]', 'weekly', True, False
                 ))
-                logger.info("✅ Default preferences created for Google user")
+                logger.info("✅ Default preferences created for new Google user (onboarding required)")
             
             conn.commit()
             conn.close()
