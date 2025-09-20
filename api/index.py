@@ -1511,12 +1511,12 @@ class AINewsRouter:
             # Send OTP email using inline Brevo service
             try:
                 # Inline email service to bypass import issues
-                async def send_otp_email_inline(user_email: str, user_name: str, otp: str) -> bool:
+                def send_otp_email_inline(user_email: str, user_name: str, otp: str) -> bool:
                     """Send OTP email using Brevo API"""
                     try:
                         import json
-                        import asyncio
-                        import aiohttp
+                        import urllib.request
+                        import urllib.parse
                         
                         # Brevo configuration
                         brevo_api_key = os.getenv('BREVO_API_KEY')
@@ -1602,8 +1602,6 @@ Vidyagam • Connecting AI Innovation
                         }
                         
                         # Use synchronous requests for Railway compatibility
-                        import urllib.request
-                        import urllib.parse
                         
                         req = urllib.request.Request(
                             'https://api.brevo.com/v3/smtp/email',
@@ -1625,16 +1623,25 @@ Vidyagam • Connecting AI Innovation
                         logger.error(f"📧 Failed to send OTP email: {e}")
                         return False
                 
-                # Try to send OTP email using inline service
+                # Try to send OTP email using inline service  
                 email_sent = False
                 try:
+                    logger.info(f"📧 Calling inline email service for {email}")
+                    logger.info(f"🔑 BREVO_API_KEY configured: {'Yes' if os.getenv('BREVO_API_KEY') else 'No'}")
+                    logger.info(f"🔑 BREVO_API_KEY length: {len(os.getenv('BREVO_API_KEY', ''))}")
+                    
+                    # Call the synchronous inline function (not async)
                     email_sent = send_otp_email_inline(email, name or "AI Enthusiast", otp_code)
+                    
                     if email_sent:
-                        logger.info(f"📧 OTP email sent successfully via inline service to {email}")
+                        logger.info(f"📧 ✅ OTP email sent successfully via inline service to {email}")
                     else:
-                        logger.warning("📧 Inline email service failed, using fallback")
+                        logger.warning("📧 ⚠️ Inline email service returned False")
                 except Exception as email_error:
-                    logger.error(f"📧 Inline email service error: {email_error}")
+                    logger.error(f"📧 ❌ Inline email service error: {str(email_error)}")
+                    logger.error(f"📧 ❌ Error type: {type(email_error).__name__}")
+                    import traceback
+                    logger.error(f"📧 ❌ Traceback: {traceback.format_exc()}")
                     email_sent = False
                 
                 if email_sent:
