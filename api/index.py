@@ -243,11 +243,38 @@ CONTENT_TYPES = {
 class AINewsRouter:
     def __init__(self):
         self.auth_service = AuthService()
-        self.db_path = "ai_news.db"
-        logger.info("🏗️ AINewsRouter initialized with complete authentication and debug logging")
+        # Use Railway persistent volume for database storage
+        data_dir = os.environ.get('RAILWAY_VOLUME_MOUNT_PATH', '/app/data')
+        if not os.path.exists(data_dir):
+            os.makedirs(data_dir, exist_ok=True)
+            logger.info(f"📁 Created data directory: {data_dir}")
+        
+        self.db_path = os.path.join(data_dir, "ai_news.db")
+        logger.info(f"🗄️ Database path: {self.db_path}")
+        logger.info("🏗️ AINewsRouter initialized with persistent database storage")
+        
+        # Check for legacy database and migrate if needed
+        legacy_db_path = "ai_news.db"
+        if os.path.exists(legacy_db_path) and not os.path.exists(self.db_path):
+            logger.info(f"🔄 Migrating legacy database from {legacy_db_path} to {self.db_path}")
+            try:
+                import shutil
+                shutil.move(legacy_db_path, self.db_path)
+                logger.info("✅ Database migration completed successfully")
+            except Exception as e:
+                logger.error(f"❌ Database migration failed: {e}")
         
         # Initialize database schema on startup
         self.initialize_database()
+        
+        # Log persistence setup for debugging
+        logger.info(f"📊 Database persistence check:")
+        logger.info(f"   📁 Data directory: {data_dir}")
+        logger.info(f"   🗄️ Database file: {self.db_path}")
+        logger.info(f"   ✅ Directory exists: {os.path.exists(data_dir)}")
+        logger.info(f"   ✅ Directory writable: {os.access(data_dir, os.W_OK)}")
+        logger.info(f"   🔒 Volume mount path: {os.environ.get('RAILWAY_VOLUME_MOUNT_PATH', 'not_set')}")
+        logger.info(f"   📈 Database file size: {os.path.getsize(self.db_path) if os.path.exists(self.db_path) else 0} bytes")
     
     def initialize_database(self):
         """
@@ -536,6 +563,13 @@ class AINewsRouter:
                     "processor": True,
                     "ai_sources": 15,
                     "authentication": True
+                },
+                "storage": {
+                    "database_path": self.db_path,
+                    "data_directory": os.path.dirname(self.db_path),
+                    "volume_mount": os.environ.get('RAILWAY_VOLUME_MOUNT_PATH', 'not_configured'),
+                    "file_exists": os.path.exists(self.db_path),
+                    "directory_writable": os.access(os.path.dirname(self.db_path), os.W_OK)
                 },
                 "router_info": {
                     "architecture": "single_function_router",
