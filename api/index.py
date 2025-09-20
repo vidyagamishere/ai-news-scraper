@@ -1816,7 +1816,11 @@ Vidyagam • Connecting AI Innovation
                         "email": email,
                         "emailVerificationRequired": True,
                         "otpSent": True,
-                        "expiresInMinutes": 10
+                        "expiresInMinutes": 10,
+                        "debug_info": {
+                            "otp_for_testing": otp,  # Include for testing even when email succeeds
+                            "email_service_working": True
+                        }
                     }
                 else:
                     logger.warning(f"📧 Email service failed for {email}, providing OTP for testing")
