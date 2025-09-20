@@ -1508,62 +1508,133 @@ class AINewsRouter:
             conn.commit()
             conn.close()
             
-            # Send OTP email using existing Brevo service
+            # Send OTP email using inline Brevo service
             try:
-                # Import email service with proper path handling for Railway
-                email_service = None
+                # Inline email service to bypass import issues
+                async def send_otp_email_inline(user_email: str, user_name: str, otp: str) -> bool:
+                    """Send OTP email using Brevo API"""
+                    try:
+                        import json
+                        import asyncio
+                        import aiohttp
+                        
+                        # Brevo configuration
+                        brevo_api_key = os.getenv('BREVO_API_KEY')
+                        if not brevo_api_key:
+                            logger.error("📧 BREVO_API_KEY not configured")
+                            return False
+                        
+                        # Email content
+                        html_content = f"""
+                        <!DOCTYPE html>
+                        <html>
+                        <head>
+                            <meta charset="UTF-8">
+                            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                            <title>Verification Code</title>
+                        </head>
+                        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+                            <div style="text-align: center; margin-bottom: 32px; padding: 24px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 16px; color: white;">
+                                <h1 style="margin: 0; font-size: 28px; font-weight: 800;">🔐 Verification Code</h1>
+                                <p style="margin: 8px 0 0 0; font-size: 16px; opacity: 0.9;">Vidyagam Account Verification</p>
+                            </div>
+                            
+                            <div style="margin-bottom: 32px;">
+                                <p style="font-size: 16px;">Hello {user_name},</p>
+                                <p style="font-size: 16px;">Please use the verification code below to complete your account setup:</p>
+                            </div>
+                            
+                            <div style="text-align: center; margin: 32px 0; padding: 24px; background: #f8fafc; border-radius: 12px; border: 2px dashed #667eea;">
+                                <div style="font-size: 36px; font-weight: bold; color: #667eea; letter-spacing: 8px; font-family: monospace;">{otp}</div>
+                                <p style="margin: 16px 0 0 0; font-size: 14px; color: #64748b;">This code expires in 10 minutes</p>
+                            </div>
+                            
+                            <div style="margin: 32px 0; padding: 16px; background: #fef2f2; border-radius: 8px; border-left: 4px solid #ef4444;">
+                                <p style="margin: 0; font-size: 14px; color: #7f1d1d;"><strong>Security Notice:</strong> Never share this code with anyone. We'll never ask for it via email or phone.</p>
+                            </div>
+                            
+                            <div style="text-align: center; margin-top: 32px; padding-top: 24px; border-top: 1px solid #e2e8f0;">
+                                <p style="margin: 0; font-size: 14px; color: #64748b;">
+                                    Vidyagam • Connecting AI Innovation<br>
+                                    <a href="https://ai-news-react.vercel.app" style="color: #667eea;">ai-news-react.vercel.app</a>
+                                </p>
+                            </div>
+                        </body>
+                        </html>
+                        """
+                        
+                        # Brevo API payload
+                        payload = {
+                            "sender": {
+                                "name": "Vidyagam",
+                                "email": "admin@vidyagam.com"
+                            },
+                            "to": [
+                                {
+                                    "email": user_email,
+                                    "name": user_name
+                                }
+                            ],
+                            "subject": "🔐 Your Vidyagam Verification Code",
+                            "htmlContent": html_content,
+                            "textContent": f"""
+Verification Code - Vidyagam
+
+Hello {user_name},
+
+Please use the verification code below to complete your account setup:
+
+{otp}
+
+This code will expire in 10 minutes.
+
+SECURITY NOTICE: Never share this verification code with anyone.
+
+Vidyagam • Connecting AI Innovation
+                            """
+                        }
+                        
+                        # Send via Brevo
+                        headers = {
+                            'accept': 'application/json',
+                            'api-key': brevo_api_key,
+                            'content-type': 'application/json'
+                        }
+                        
+                        # Use synchronous requests for Railway compatibility
+                        import urllib.request
+                        import urllib.parse
+                        
+                        req = urllib.request.Request(
+                            'https://api.brevo.com/v3/smtp/email',
+                            data=json.dumps(payload).encode('utf-8'),
+                            headers=headers,
+                            method='POST'
+                        )
+                        
+                        with urllib.request.urlopen(req) as response:
+                            response_data = response.read()
+                            if response.status == 201:
+                                logger.info(f"📧 OTP email sent successfully to {user_email}")
+                                return True
+                            else:
+                                logger.error(f"📧 Brevo API error: {response.status} - {response_data}")
+                                return False
+                        
+                    except Exception as e:
+                        logger.error(f"📧 Failed to send OTP email: {e}")
+                        return False
                 
-                # Check what files actually exist in deployment
-                import sys
-                import os
-                current_dir = os.path.dirname(os.path.abspath(__file__))
-                logger.info(f"📂 Current directory: {current_dir}")
-                logger.info(f"📂 Files in current dir: {os.listdir(current_dir) if os.path.exists(current_dir) else 'Dir not found'}")
-                
-                # Check lib directory
-                lib_dir = os.path.join(current_dir, 'lib')
-                logger.info(f"📂 Lib directory: {lib_dir}")
-                logger.info(f"📂 Lib dir exists: {os.path.exists(lib_dir)}")
-                if os.path.exists(lib_dir):
-                    logger.info(f"📂 Files in lib dir: {os.listdir(lib_dir)}")
-                
-                # Check parent directory structure
-                parent_dir = os.path.dirname(current_dir)
-                logger.info(f"📂 Parent directory: {parent_dir}")
-                if os.path.exists(parent_dir):
-                    logger.info(f"📂 Files in parent dir: {os.listdir(parent_dir)}")
-                
+                # Try to send OTP email using inline service
+                email_sent = False
                 try:
-                    # Try absolute import with Railway-style path
-                    if os.path.exists(os.path.join(current_dir, 'lib', 'email_service.py')):
-                        # Add lib to sys.path
-                        lib_path = os.path.join(current_dir, 'lib')
-                        if lib_path not in sys.path:
-                            sys.path.insert(0, lib_path)
-                        
-                        # Import the module
-                        import email_service
-                        email_service_module = email_service
-                        
-                        # Get the class
-                        EmailDigestService = email_service_module.EmailDigestService
-                        email_service = EmailDigestService()
-                        logger.info("📧 EmailDigestService imported successfully via absolute path")
+                    email_sent = send_otp_email_inline(email, name or "AI Enthusiast", otp_code)
+                    if email_sent:
+                        logger.info(f"📧 OTP email sent successfully via inline service to {email}")
                     else:
-                        logger.error(f"📧 email_service.py not found at {os.path.join(current_dir, 'lib', 'email_service.py')}")
-                        email_service = None
-                except Exception as e3:
-                    logger.warning(f"All import attempts failed: {e3}")
-                    email_service = None
-                
-                if email_service:
-                    # Send OTP email with user data format
-                    user_data = {
-                        "email": email,
-                        "name": name or "AI Enthusiast"
-                    }
-                    email_sent = await email_service.send_otp_email(user_data, otp)
-                else:
+                        logger.warning("📧 Inline email service failed, using fallback")
+                except Exception as email_error:
+                    logger.error(f"📧 Inline email service error: {email_error}")
                     email_sent = False
                 
                 if email_sent:
