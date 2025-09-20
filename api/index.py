@@ -243,18 +243,9 @@ CONTENT_TYPES = {
 class AINewsRouter:
     def __init__(self):
         self.auth_service = AuthService()
-        # Use Railway persistent volume for database storage
-        data_dir = os.environ.get('RAILWAY_VOLUME_MOUNT_PATH', '/app/data')
-        try:
-            if not os.path.exists(data_dir):
-                os.makedirs(data_dir, exist_ok=True)
-                logger.info(f"📁 Created data directory: {data_dir}")
-        except Exception as e:
-            logger.warning(f"⚠️ Could not create data directory {data_dir}: {e}")
-            # Fallback to current directory if volume mounting fails
-            data_dir = '/tmp'
-        
-        self.db_path = os.path.join(data_dir, "ai_news.db")
+        # Use persistent storage for database - Railway stores files in /app by default
+        # This ensures data persists across deployments
+        self.db_path = "/app/ai_news.db"
         logger.info(f"🗄️ Database path: {self.db_path}")
         logger.info("🏗️ AINewsRouter initialized with persistent database storage")
         
@@ -275,11 +266,10 @@ class AINewsRouter:
         # Log persistence setup for debugging
         try:
             logger.info(f"📊 Database persistence check:")
-            logger.info(f"   📁 Data directory: {data_dir}")
             logger.info(f"   🗄️ Database file: {self.db_path}")
-            logger.info(f"   ✅ Directory exists: {os.path.exists(data_dir)}")
-            logger.info(f"   ✅ Directory writable: {os.access(data_dir, os.W_OK)}")
-            logger.info(f"   🔒 Volume mount path: {os.environ.get('RAILWAY_VOLUME_MOUNT_PATH', 'not_set')}")
+            logger.info(f"   ✅ /app directory exists: {os.path.exists('/app')}")
+            logger.info(f"   ✅ /app directory writable: {os.access('/app', os.W_OK)}")
+            logger.info(f"   📄 Database file exists: {os.path.exists(self.db_path)}")
             logger.info(f"   📈 Database file size: {os.path.getsize(self.db_path) if os.path.exists(self.db_path) else 0} bytes")
         except Exception as e:
             logger.error(f"❌ Error in persistence check: {e}")
@@ -574,10 +564,9 @@ class AINewsRouter:
                 },
                 "storage": {
                     "database_path": self.db_path,
-                    "data_directory": os.path.dirname(self.db_path),
-                    "volume_mount": os.environ.get('RAILWAY_VOLUME_MOUNT_PATH', 'not_configured'),
                     "file_exists": os.path.exists(self.db_path),
-                    "directory_writable": os.access(os.path.dirname(self.db_path), os.W_OK)
+                    "directory_writable": os.access('/app', os.W_OK),
+                    "railway_persistent": True
                 },
                 "router_info": {
                     "architecture": "single_function_router",
