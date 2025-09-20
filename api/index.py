@@ -2510,6 +2510,13 @@ async def health_check():
     logger.info("🏥 Direct health endpoint accessed")
     return await router.handle_health()
 
+# API Health check endpoint (Railway deployment)
+@app.get("/api/health")
+async def api_health_check():
+    """API health check endpoint for Railway deployment"""
+    logger.info("🏥 API health endpoint accessed (Railway)")
+    return await router.handle_health()
+
 # Root endpoint with comprehensive debug info
 @app.get("/")
 async def root():
