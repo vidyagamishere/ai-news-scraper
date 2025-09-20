@@ -1631,7 +1631,7 @@ Vidyagam • Connecting AI Innovation
                     logger.info(f"🔑 BREVO_API_KEY length: {len(os.getenv('BREVO_API_KEY', ''))}")
                     
                     # Call the synchronous inline function (not async)
-                    email_sent = send_otp_email_inline(email, name or "AI Enthusiast", otp_code)
+                    email_sent = send_otp_email_inline(email, name or "AI Enthusiast", otp)
                     
                     if email_sent:
                         logger.info(f"📧 ✅ OTP email sent successfully via inline service to {email}")
