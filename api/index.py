@@ -1805,11 +1805,11 @@ Vidyagam • Connecting AI Innovation
                     "verified_email": existing_user[3],
                     "subscription_tier": existing_user[4] or 'free',
                     "preferences": {
-                        "topics": json.loads(prefs_row[2]) if prefs_row and prefs_row[2] else [],
-                        "content_types": json.loads(prefs_row[3]) if prefs_row and prefs_row[3] else ["blogs", "podcasts", "videos"],
-                        "newsletter_frequency": prefs_row[4] if prefs_row else 'weekly',
-                        "email_notifications": prefs_row[5] if prefs_row else True,
-                        "onboarding_completed": prefs_row[6] if prefs_row else False
+                        "topics": json.loads(prefs_row[1]) if prefs_row and prefs_row[1] else [],
+                        "content_types": json.loads(prefs_row[4]) if prefs_row and prefs_row[4] else ["blogs", "podcasts", "videos"],
+                        "newsletter_frequency": prefs_row[2] if prefs_row else 'weekly',
+                        "email_notifications": prefs_row[3] if prefs_row else True,
+                        "onboarding_completed": prefs_row[5] if prefs_row else False
                     }
                 }
                 
