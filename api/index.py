@@ -486,6 +486,9 @@ class AINewsRouter:
             elif endpoint == "test-neon":
                 logger.info("🧪 Routing to test-neon handler")
                 return await self.handle_test_neon()
+            elif endpoint == "reset-database":
+                logger.info("🗑️ Routing to database reset handler")
+                return await self.handle_reset_database()
             elif endpoint == "content-types":
                 logger.info("📂 Routing to content-types handler")
                 return await self.handle_content_types()
@@ -832,6 +835,87 @@ class AINewsRouter:
             return {
                 "database_connection": "failed",
                 "error": str(e),
+                "timestamp": datetime.utcnow().isoformat(),
+                "debug_info": {
+                    "traceback": traceback.format_exc()
+                }
+            }
+    
+    async def handle_reset_database(self) -> Dict[str, Any]:
+        """Reset SQLite database - clear all user data for fresh start"""
+        try:
+            logger.info("🗑️ Processing database reset request")
+            
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+            
+            # Count records before deletion
+            cursor.execute("SELECT COUNT(*) FROM users")
+            users_before = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM email_otps")
+            otps_before = cursor.fetchone()[0]
+            
+            # Clear all authentication-related tables
+            logger.info("🗑️ Clearing users table...")
+            cursor.execute("DELETE FROM users")
+            
+            logger.info("🗑️ Clearing user_preferences table...")
+            cursor.execute("DELETE FROM user_preferences")
+            
+            logger.info("🗑️ Clearing email_otps table...")
+            cursor.execute("DELETE FROM email_otps")
+            
+            # Clear user_passwords table if it exists
+            try:
+                logger.info("🗑️ Clearing user_passwords table...")
+                cursor.execute("DELETE FROM user_passwords")
+            except:
+                logger.info("ℹ️ user_passwords table doesn't exist, skipping")
+            
+            # Reset auto-increment sequences
+            cursor.execute("DELETE FROM sqlite_sequence WHERE name IN ('users', 'user_preferences', 'email_otps', 'user_passwords')")
+            
+            conn.commit()
+            
+            # Verify deletion
+            cursor.execute("SELECT COUNT(*) FROM users")
+            users_after = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM email_otps")
+            otps_after = cursor.fetchone()[0]
+            
+            conn.close()
+            
+            reset_response = {
+                "success": True,
+                "message": "Database reset completed successfully",
+                "cleared_tables": ["users", "user_preferences", "email_otps", "user_passwords"],
+                "statistics": {
+                    "users_deleted": users_before,
+                    "otps_deleted": otps_before,
+                    "users_remaining": users_after,
+                    "otps_remaining": otps_after
+                },
+                "timestamp": datetime.utcnow().isoformat(),
+                "database_type": "sqlite",
+                "fresh_start": True,
+                "debug_info": {
+                    "reset_scope": "authentication_data_only",
+                    "articles_preserved": True,
+                    "content_preserved": True
+                }
+            }
+            
+            logger.info(f"✅ Database reset completed - Deleted {users_before} users, {otps_before} OTPs")
+            return reset_response
+            
+        except Exception as e:
+            logger.error(f"❌ Database reset failed: {str(e)}")
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            return {
+                "success": False,
+                "message": f"Database reset failed: {str(e)}",
                 "timestamp": datetime.utcnow().isoformat(),
                 "debug_info": {
                     "traceback": traceback.format_exc()
