@@ -1204,6 +1204,19 @@ class AINewsRouter:
             
             logger.info(f"📊 User preferences loaded: onboarding_completed={preferences['onboarding_completed']}")
             
+            # Create default preferences for Google users if they don't exist
+            if not user_prefs:
+                logger.info("📝 Creating default preferences for Google user (new or missing prefs)")
+                cursor.execute("""
+                    INSERT OR REPLACE INTO user_preferences (
+                        user_id, topics, content_types, newsletter_frequency, 
+                        email_notifications, onboarding_completed
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                """, (
+                    user_id, '[]', '["blogs", "podcasts", "videos"]', 'weekly', True, True
+                ))
+                logger.info("✅ Default preferences created for Google user")
+            
             conn.commit()
             conn.close()
             
@@ -1802,10 +1815,12 @@ Vidyagam • Connecting AI Innovation
                 
                 # Create JWT token for existing user
                 token_data = {
-                    "user_id": existing_user[0],
+                    "sub": existing_user[0],  # Use 'sub' field consistently
                     "email": existing_user[1],
                     "name": existing_user[2],
-                    "exp": (datetime.utcnow() + timedelta(days=7)).timestamp()
+                    "picture": "",
+                    "iat": int(datetime.utcnow().timestamp()),
+                    "exp": int((datetime.utcnow() + timedelta(days=7)).timestamp())
                 }
                 jwt_token = self.auth_service.create_jwt_token(token_data)
                 
