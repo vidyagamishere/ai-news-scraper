@@ -2032,7 +2032,7 @@ class AINewsRouter:
                     "user_created_or_updated": True,
                     "jwt_token_length": len(jwt_token),
                     "is_existing_user": is_existing_user,
-                    "preferences_loaded": bool(user_prefs)
+                    "preferences_loaded": bool(preferences)
                 }
             }
             
