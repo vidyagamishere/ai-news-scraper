@@ -1820,14 +1820,17 @@ class AINewsRouter:
             
             # Verify authentication
             auth_header = headers.get('Authorization') or headers.get('authorization')
+            logger.info(f"🔐 Extracting user from auth header: {'✅' if auth_header else '❌'}")
             user_data = self.auth_service.get_user_from_token(auth_header)
             
             if not user_data:
                 logger.warning("❌ Personalized digest requested without valid authentication")
                 return {"error": "Authentication required for personalized content", "status": 401}
             
-            # Get base digest
-            base_digest = await self.handle_digest(params)
+            logger.info(f"✅ JWT token verified successfully for: {user_data.get('email')}")
+            
+            # Get personalized digest with authentication headers passed through
+            base_digest = await self.handle_digest(params, headers)
             
             # Add personalization metadata
             base_digest["personalized"] = True
