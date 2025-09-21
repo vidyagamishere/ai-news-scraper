@@ -392,7 +392,8 @@ class AINewsRouter:
                 ('newsletter_subscribed', 'BOOLEAN', True),
                 ('experience_level', 'TEXT', None),
                 ('role_type', 'TEXT', None),
-                ('content_types', 'TEXT', None)
+                ('content_types', 'TEXT', None),
+                ('user_roles', 'TEXT', None)  # JSON array of selected user roles
             ]
             
             for column_name, column_type, default_value in required_preference_columns:
@@ -1331,6 +1332,28 @@ class AINewsRouter:
         """Get mandatory topics that should be assigned to all users during onboarding"""
         # Removed mandatory AI and ML topics to enable true personalization differences between users
         return []
+    
+    def get_topics_from_user_roles(self, user_roles: List[str]) -> List[str]:
+        """Convert user roles to consolidated topic list for feed generation"""
+        # Role-to-topics mapping
+        role_topic_mapping = {
+            "novice": ["ai-explained", "ai-in-everyday-life", "fun-and-interesting-ai", "basic-ethics"],
+            "student": ["educational-content", "project-ideas", "career-trends", "machine-learning", "deep-learning", "tools-and-frameworks", "data-science"],
+            "professional": ["industry-news", "applied-ai", "case-studies", "podcasts-and-interviews", "cloud-computing", "robotics"],
+            "executive": ["ai-ethics-and-safety", "investment-and-funding", "strategic-implications", "policy-and-regulation", "leadership-and-innovation", "ai-research"]
+        }
+        
+        # Consolidate topics from all selected roles
+        consolidated_topics = set()
+        for role in user_roles:
+            if role in role_topic_mapping:
+                consolidated_topics.update(role_topic_mapping[role])
+        
+        # Convert back to list and log the consolidation
+        topics_list = list(consolidated_topics)
+        logger.info(f"🎯 Role consolidation: {user_roles} → {len(topics_list)} topics: {topics_list}")
+        
+        return topics_list
 
     async def get_user_preferences(self, user_id: str) -> Dict:
         """Get user preferences from database (users table preferences column)"""
@@ -1373,10 +1396,19 @@ class AINewsRouter:
                 if "articles" in content_types:
                     content_types = ["blogs", "podcasts", "videos"]
                 
-                logger.info(f"🎯 User preferences loaded - Topics: {topics}, Content Types: {content_types}")
+                # Extract user roles - NEW ENHANCEMENT
+                user_roles = preferences.get("user_roles", [])
+                if isinstance(user_roles, str):
+                    try:
+                        user_roles = json.loads(user_roles)
+                    except:
+                        user_roles = []
+                
+                logger.info(f"🎯 User preferences loaded - Topics: {topics}, Content Types: {content_types}, User Roles: {user_roles}")
                 
                 return {
                     "topics": topics,
+                    "user_roles": user_roles,
                     "content_types": content_types,
                     "newsletter_frequency": preferences.get("newsletter_frequency", "weekly"),
                     "email_notifications": preferences.get("email_notifications", True),
@@ -1384,9 +1416,10 @@ class AINewsRouter:
                 }
             else:
                 logger.info(f"🎯 No preferences found for user {user_id}, using defaults")
-                # Return default preferences
+                # Return default preferences with default student role
                 return {
                     "topics": [],
+                    "user_roles": ["student"],  # Default to student role
                     "content_types": ["blogs", "podcasts", "videos"],
                     "newsletter_frequency": "weekly",
                     "email_notifications": True,
@@ -1399,6 +1432,7 @@ class AINewsRouter:
             logger.error(f"❌ Traceback: {traceback.format_exc()}")
             return {
                 "topics": [],
+                "user_roles": ["student"],  # Default to student role
                 "content_types": ["blogs", "podcasts", "videos"],
                 "newsletter_frequency": "weekly",
                 "email_notifications": True,
@@ -1430,20 +1464,122 @@ class AINewsRouter:
         return preference_filtered
     
     def filter_articles_by_user_preferences(self, articles: List[Dict], user_preferences: Dict) -> List[Dict]:
-        """Filter and prioritize articles based on user's topic preferences"""
+        """Filter and prioritize articles based on user's role-based topic preferences"""
         
         user_topics = user_preferences.get("topics", [])
+        user_roles = user_preferences.get("user_roles", [])
         user_content_types = user_preferences.get("content_types", [])
         
+        # Convert user roles to topics for consolidated filtering
+        if user_roles:
+            role_based_topics = self.get_topics_from_user_roles(user_roles)
+            # Combine explicit topics with role-based topics
+            all_topics = list(set(user_topics + role_based_topics))
+            logger.info(f"🎯 Role-based filtering: Roles {user_roles} + Topics {user_topics} = Combined {all_topics}")
+        else:
+            all_topics = user_topics
+        
         # If user has no preferences at all, return all articles
-        if not user_topics and not user_content_types:
+        if not all_topics and not user_content_types:
             return articles
         
-        logger.info(f"🎯 Filtering with user preferences - Topics: {user_topics}, Content Types: {user_content_types}")
+        logger.info(f"🎯 Filtering with consolidated preferences - Topics: {all_topics}, Content Types: {user_content_types}")
         
-        # Comprehensive topic keywords - 100 significant meta words per topic
-        # Handle different topic ID formats from database
+        # Comprehensive topic keywords - includes new role-based topics
+        # Handle different topic ID formats from database and new role-based topics
         topic_keywords = {
+            # === NEW ROLE-BASED TOPICS ===
+            
+            # Novice Topics
+            "ai-explained": [
+                "ai explained", "artificial intelligence explained", "beginner ai", "ai basics", "introduction to ai",
+                "simple ai", "ai for beginners", "what is ai", "ai concepts", "basic ai", "ai fundamentals",
+                "easy ai", "ai simplified", "understanding ai", "ai overview", "ai tutorial", "learn ai",
+                "ai guide", "ai primer", "ai introduction", "ai 101", "ai for dummies", "plain english ai"
+            ],
+            "ai-in-everyday-life": [
+                "everyday ai", "ai in daily life", "ai applications", "ai examples", "real world ai",
+                "consumer ai", "smart devices", "virtual assistant", "siri", "alexa", "google assistant",
+                "smart home", "ai phones", "ai apps", "navigation", "maps", "recommendations", "netflix ai",
+                "spotify ai", "social media ai", "shopping ai", "email filters", "spam detection"
+            ],
+            "fun-and-interesting-ai": [
+                "fun ai", "interesting ai", "cool ai", "amazing ai", "weird ai", "funny ai", "creative ai",
+                "ai art", "ai music", "ai games", "ai stories", "ai jokes", "ai creativity", "strange ai",
+                "surprising ai", "fascinating ai", "mind blowing ai", "incredible ai", "awesome ai"
+            ],
+            "basic-ethics": [
+                "ai ethics basics", "simple ai ethics", "ai fairness", "ai bias basics", "responsible ai basics",
+                "ai safety basics", "ai privacy", "ai transparency", "ai accountability", "ethical ai introduction"
+            ],
+            
+            # Student Topics  
+            "educational-content": [
+                "ai education", "learning ai", "ai courses", "ai tutorials", "ai training", "ai certification",
+                "ai bootcamp", "ai curriculum", "ai degree", "ai mooc", "coursera ai", "udacity ai", "edx ai",
+                "khan academy", "mit opencourseware", "stanford ai course", "berkeley ai course"
+            ],
+            "project-ideas": [
+                "ai projects", "ml projects", "ai hackathon", "ai competition", "kaggle", "github ai",
+                "ai portfolio", "ai demos", "ai prototypes", "ai experiments", "hands on ai", "practical ai",
+                "build ai", "create ai", "develop ai", "ai coding", "ai programming"
+            ],
+            "career-trends": [
+                "ai jobs", "ai careers", "ai employment", "ai salary", "ai hiring", "ai skills", "ai resume",
+                "data scientist jobs", "ml engineer", "ai engineer", "ai researcher jobs", "tech careers",
+                "ai job market", "ai skills demand", "ai career path", "ai internship"
+            ],
+            "tools-and-frameworks": [
+                "ai tools", "ml frameworks", "tensorflow", "pytorch", "scikit-learn", "keras", "pandas",
+                "numpy", "jupyter", "colab", "anaconda", "docker ai", "kubernetes ai", "cloud ai tools",
+                "hugging face", "wandb", "mlflow", "streamlit", "gradio", "fastapi"
+            ],
+            "data-science": [
+                "data science", "data analysis", "data visualization", "statistics", "data mining",
+                "big data", "data engineering", "etl", "sql", "python data", "r programming",
+                "tableau", "power bi", "matplotlib", "seaborn", "plotly", "pandas", "data cleaning"
+            ],
+            
+            # Professional Topics
+            "applied-ai": [
+                "ai implementation", "ai deployment", "ai in production", "enterprise ai", "ai solutions",
+                "ai consulting", "ai strategy", "ai transformation", "ai adoption", "ai integration",
+                "business ai", "commercial ai", "ai roi", "ai value", "ai success stories"
+            ],
+            "case-studies": [
+                "ai case study", "ai success story", "ai implementation story", "ai project case",
+                "real world ai", "ai in action", "ai results", "ai impact", "ai outcomes",
+                "ai lessons learned", "ai best practices", "ai failure stories", "ai mistakes"
+            ],
+            "cloud-computing": [
+                "cloud ai", "aws ai", "azure ai", "google cloud ai", "cloud ml", "serverless ai",
+                "ai as a service", "cloud deployment", "kubernetes", "docker", "microservices ai",
+                "edge computing", "distributed ai", "scalable ai", "cloud infrastructure"
+            ],
+            
+            # Executive Topics
+            "investment-and-funding": [
+                "ai investment", "ai funding", "ai venture capital", "ai vc", "ai startups funding",
+                "ai ipo", "ai valuation", "ai market cap", "ai unicorn", "ai acquisition", "ai merger",
+                "ai stock", "ai public companies", "ai private equity", "ai angel investment"
+            ],
+            "strategic-implications": [
+                "ai strategy", "business strategy", "digital transformation", "ai disruption",
+                "competitive advantage", "market disruption", "ai impact on business", "strategic ai",
+                "ai roadmap", "ai planning", "business model innovation", "ai value creation"
+            ],
+            "policy-and-regulation": [
+                "ai regulation", "ai policy", "ai governance", "ai compliance", "ai law", "ai legal",
+                "gdpr ai", "ai privacy law", "ai safety regulation", "government ai", "public policy ai",
+                "ai standards", "ai certification", "regulatory framework", "ai oversight"
+            ],
+            "leadership-and-innovation": [
+                "ai leadership", "innovation management", "digital leadership", "change management",
+                "ai transformation", "organizational change", "ai culture", "innovation strategy",
+                "technology leadership", "ai vision", "executive ai", "c-suite ai", "board ai"
+            ],
+            
+            # === EXISTING TOPICS (preserved) ===
             "machine_learning": [
                 # Core ML Terms
                 "machine learning", "ml", "artificial intelligence", "ai", "neural network", "deep learning", 
@@ -1694,15 +1830,15 @@ class AINewsRouter:
             # Calculate preference score
             preference_score = 0
             
-            # Score based on user's selected topics
-            for user_topic in user_topics:
+            # Score based on user's selected topics (including role-based topics)
+            for user_topic in all_topics:
                 if user_topic in topic_keywords:
                     topic_keyword_list = topic_keywords[user_topic]
                     topic_matches = sum(1 for keyword in topic_keyword_list if keyword in content_text)
                     preference_score += topic_matches * 2  # Higher weight for topic matches
             
             # If user has no topics selected, give a base preference score for general AI content
-            if not user_topics:
+            if not all_topics:
                 # Score general AI content when no specific topics are selected
                 ai_general_keywords = ["ai", "artificial intelligence", "machine learning", "deep learning", 
                                      "neural network", "algorithm", "model", "technology", "innovation"]
@@ -3011,78 +3147,88 @@ Vidyagam • Connecting AI Innovation
             }
         ]
         
-        # Topic categories based on our sources
-        topics = [
+        # Role-based topic system - NEW ENHANCEMENT
+        # Four primary user roles, each with specific topics
+        user_roles = [
             {
-                "id": "ai-research",
-                "name": "AI Research",
-                "description": "Latest AI research papers, findings, and breakthroughs",
-                "category": "research",
-                "sources": ["OpenAI Blog", "Anthropic Blog", "Google AI Blog", "Papers With Code"]
+                "id": "novice",
+                "name": "Novice",
+                "description": "New to AI, looking for accessible explanations and everyday applications",
+                "icon": "🌟",
+                "topics": ["ai-explained", "ai-in-everyday-life", "fun-and-interesting-ai", "basic-ethics"]
             },
             {
-                "id": "machine-learning",
-                "name": "Machine Learning",
-                "description": "ML techniques, algorithms, and practical applications",
-                "category": "technical",
-                "sources": ["Towards Data Science", "Distill.pub", "Fast.ai"]
+                "id": "student", 
+                "name": "Student",
+                "description": "Learning AI, seeking educational content and career guidance",
+                "icon": "🎓",
+                "topics": ["educational-content", "project-ideas", "career-trends", "machine-learning", "deep-learning", "tools-and-frameworks", "data-science"]
             },
             {
-                "id": "industry-news",
-                "name": "Industry News",
-                "description": "AI industry updates, company news, and market trends",
-                "category": "business",
-                "sources": ["The Batch by DeepLearning.AI", "AI Breakfast", "The Rundown AI"]
+                "id": "professional",
+                "name": "Professional",
+                "description": "Working in AI/tech, focused on industry applications and case studies",
+                "icon": "💼",
+                "topics": ["industry-news", "applied-ai", "case-studies", "podcasts-and-interviews", "cloud-computing", "robotics"]
             },
             {
-                "id": "deep-learning",
-                "name": "Deep Learning",
-                "description": "Neural networks, deep learning architectures and applications",
-                "category": "technical",
-                "sources": ["DeepLearning.AI YouTube", "3Blue1Brown", "Two Minute Papers"]
-            },
-            {
-                "id": "tools-frameworks",
-                "name": "AI Tools & Frameworks",
-                "description": "AI development tools, libraries, and frameworks",
-                "category": "tools",
-                "sources": ["Hugging Face Blog", "Papers With Code"]
-            },
-            {
-                "id": "ethics-safety",
-                "name": "AI Ethics & Safety",
-                "description": "AI safety, ethics, governance, and responsible AI development",
-                "category": "ethics",
-                "sources": ["Anthropic Blog", "Stanford HAI"]
-            },
-            {
-                "id": "podcasts-interviews",
-                "name": "Podcasts & Interviews",
-                "description": "Long-form conversations with AI researchers and practitioners",
-                "category": "media",
-                "sources": ["Lex Fridman Podcast", "Machine Learning Street Talk", "The AI Podcast"]
-            },
-            {
-                "id": "educational",
-                "name": "Educational Content",
-                "description": "Learning resources, courses, and tutorials",
-                "category": "education",
-                "sources": ["MIT OpenCourseWare", "Stanford AI Courses", "Coursera AI Courses"]
+                "id": "executive",
+                "name": "Executive",
+                "description": "Making strategic AI decisions, focused on ethics, investment, and policy",
+                "icon": "🎯",
+                "topics": ["ai-ethics-and-safety", "investment-and-funding", "strategic-implications", "policy-and-regulation", "leadership-and-innovation", "ai-research"]
             }
+        ]
+        
+        # All available topics with enhanced metadata
+        topics = [
+            # Novice topics
+            {"id": "ai-explained", "name": "AI Explained", "description": "Simple explanations of AI concepts for beginners", "category": "beginner", "role": "novice"},
+            {"id": "ai-in-everyday-life", "name": "AI in Everyday Life", "description": "How AI affects daily life and common applications", "category": "beginner", "role": "novice"},
+            {"id": "fun-and-interesting-ai", "name": "Fun & Interesting AI", "description": "Entertaining and fascinating AI stories and discoveries", "category": "beginner", "role": "novice"},
+            {"id": "basic-ethics", "name": "Basic Ethics", "description": "Introduction to AI ethics and responsible use", "category": "ethics", "role": "novice"},
+            
+            # Student topics
+            {"id": "educational-content", "name": "Educational Content", "description": "Learning resources, courses, and tutorials", "category": "education", "role": "student"},
+            {"id": "project-ideas", "name": "Project Ideas", "description": "AI project suggestions and implementation guides", "category": "education", "role": "student"},
+            {"id": "career-trends", "name": "Career Trends", "description": "AI job market trends and career development", "category": "career", "role": "student"},
+            {"id": "machine-learning", "name": "Machine Learning", "description": "ML algorithms, techniques, and applications", "category": "technical", "role": "student"},
+            {"id": "deep-learning", "name": "Deep Learning", "description": "Neural networks and deep learning architectures", "category": "technical", "role": "student"},
+            {"id": "tools-and-frameworks", "name": "Tools & Frameworks", "description": "AI development tools, libraries, and platforms", "category": "tools", "role": "student"},
+            {"id": "data-science", "name": "Data Science", "description": "Data analysis, visualization, and statistical methods", "category": "technical", "role": "student"},
+            
+            # Professional topics
+            {"id": "industry-news", "name": "Industry News", "description": "AI industry updates, company news, and market trends", "category": "business", "role": "professional"},
+            {"id": "applied-ai", "name": "Applied AI", "description": "Real-world AI implementations and solutions", "category": "application", "role": "professional"},
+            {"id": "case-studies", "name": "Case Studies", "description": "Detailed analysis of successful AI implementations", "category": "application", "role": "professional"},
+            {"id": "podcasts-and-interviews", "name": "Podcasts & Interviews", "description": "Expert conversations and industry insights", "category": "media", "role": "professional"},
+            {"id": "cloud-computing", "name": "Cloud Computing", "description": "AI in cloud platforms and distributed systems", "category": "infrastructure", "role": "professional"},
+            {"id": "robotics", "name": "Robotics", "description": "AI-powered robotics and automation", "category": "robotics", "role": "professional"},
+            
+            # Executive topics
+            {"id": "ai-ethics-and-safety", "name": "AI Ethics & Safety", "description": "Responsible AI development and risk management", "category": "ethics", "role": "executive"},
+            {"id": "investment-and-funding", "name": "Investment & Funding", "description": "AI investment trends and funding opportunities", "category": "finance", "role": "executive"},
+            {"id": "strategic-implications", "name": "Strategic Implications", "description": "AI's impact on business strategy and operations", "category": "strategy", "role": "executive"},
+            {"id": "policy-and-regulation", "name": "Policy & Regulation", "description": "AI governance, policies, and regulatory developments", "category": "policy", "role": "executive"},
+            {"id": "leadership-and-innovation", "name": "Leadership & Innovation", "description": "Leading AI transformation and innovation", "category": "leadership", "role": "executive"},
+            {"id": "ai-research", "name": "AI Research", "description": "Cutting-edge research and scientific breakthroughs", "category": "research", "role": "executive"}
         ]
         
         return {
             "content_types": content_types,
             "topics": topics,
+            "user_roles": user_roles,
             "default_selections": {
                 "content_types": ["blogs", "podcasts", "videos"],
-                "topics": ["ai-research", "machine-learning", "industry-news"]
+                "user_roles": ["student"]  # Default to student role
             },
             "router_endpoint": True,
             "debug_info": {
                 "timestamp": datetime.utcnow().isoformat(),
                 "total_content_types": len(content_types),
-                "total_topics": len(topics)
+                "total_topics": len(topics),
+                "total_user_roles": len(user_roles),
+                "role_based_system": True
             }
         }
     
@@ -3120,6 +3266,8 @@ Vidyagam • Connecting AI Innovation
             update_data = {}
             if 'topics' in data:
                 update_data['topics'] = json.dumps(data['topics'])
+            if 'user_roles' in data:
+                update_data['user_roles'] = json.dumps(data['user_roles'])
             if 'newsletter_frequency' in data:
                 update_data['newsletter_frequency'] = data['newsletter_frequency']
             if 'email_notifications' in data:
