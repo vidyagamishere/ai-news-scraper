@@ -613,6 +613,7 @@ class AINewsRouter:
         """Get current digest content with debug info and user preference support"""
         try:
             logger.info("📰 Processing digest request")
+            logger.info(f"🔧 handle_digest called with params={params}, headers keys: {list(headers.keys()) if headers else 'None'}")
             
             if params is None:
                 params = {}
@@ -629,6 +630,7 @@ class AINewsRouter:
             is_personalized = False
             is_preview_mode = False
             auth_header = headers.get('Authorization') or headers.get('authorization')
+            logger.info(f"🔧 handle_digest auth header check: {'Found' if auth_header else 'NOT FOUND'}")
             
             # Check if this is explicitly a preview request (no auth header or invalid token)
             if not auth_header:
@@ -1327,22 +1329,8 @@ class AINewsRouter:
     
     def get_mandatory_topics(self) -> List[Dict]:
         """Get mandatory topics that should be assigned to all users during onboarding"""
-        return [
-            {
-                'id': 'artificial_intelligence',
-                'name': 'Artificial Intelligence',
-                'description': 'General AI developments and breakthroughs',
-                'category': 'technology',
-                'selected': True
-            },
-            {
-                'id': 'machine_learning',
-                'name': 'Machine Learning',
-                'description': 'ML algorithms and techniques',
-                'category': 'technology',
-                'selected': True
-            }
-        ]
+        # Removed mandatory AI and ML topics to enable true personalization differences between users
+        return []
 
     async def get_user_preferences(self, user_id: str) -> Dict:
         """Get user preferences from database (users table preferences column)"""
@@ -1830,6 +1818,7 @@ class AINewsRouter:
             logger.info(f"✅ JWT token verified successfully for: {user_data.get('email')}")
             
             # Get personalized digest with authentication headers passed through
+            logger.info(f"🔧 Calling handle_digest with params={params} and headers keys: {list(headers.keys()) if headers else 'None'}")
             base_digest = await self.handle_digest(params, headers)
             
             # Add personalization metadata
