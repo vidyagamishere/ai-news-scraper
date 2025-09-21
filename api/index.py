@@ -3425,6 +3425,94 @@ Vidyagam • Connecting AI Innovation
             logger.error(f"❌ Traceback: {traceback.format_exc()}")
             return {"error": f"Profile fetch failed: {str(e)}", "status": 500}
     
+    async def handle_cleanup_test_users(self, params: Dict = None) -> Dict[str, Any]:
+        """Clean up test user data from all database tables"""
+        try:
+            logger.info("🧹 Starting test user cleanup...")
+            
+            # Define test user emails to clean up
+            test_emails = ["vijayanishere@gmail.com", "vidyagamishere@gmail.com"]
+            
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cleanup_results = {}
+            total_deleted = 0
+            
+            for email in test_emails:
+                logger.info(f"🗑️ Cleaning up data for: {email}")
+                email_deleted = 0
+                
+                # Get user ID first
+                cursor.execute("SELECT id FROM users WHERE email = ?", (email,))
+                user_row = cursor.fetchone()
+                user_id = user_row[0] if user_row else None
+                
+                # Delete from all related tables
+                tables_to_clean = [
+                    ("email_otps", "email", email),
+                    ("user_passwords", "user_id", user_id) if user_id else None,
+                    ("user_sessions", "user_id", user_id) if user_id else None,
+                    ("users", "email", email)
+                ]
+                
+                for table_info in tables_to_clean:
+                    if table_info is None:
+                        continue
+                        
+                    table_name, column_name, value = table_info
+                    
+                    # Check if table exists
+                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
+                    if not cursor.fetchone():
+                        logger.info(f"📋 Table {table_name} does not exist, skipping")
+                        continue
+                    
+                    # Count existing records
+                    cursor.execute(f"SELECT COUNT(*) FROM {table_name} WHERE {column_name} = ?", (value,))
+                    count_before = cursor.fetchone()[0]
+                    
+                    if count_before > 0:
+                        # Delete records
+                        cursor.execute(f"DELETE FROM {table_name} WHERE {column_name} = ?", (value,))
+                        deleted_count = cursor.rowcount
+                        email_deleted += deleted_count
+                        logger.info(f"🗑️ Deleted {deleted_count} records from {table_name} for {email}")
+                    else:
+                        logger.info(f"📋 No records found in {table_name} for {email}")
+                
+                cleanup_results[email] = {
+                    "total_records_deleted": email_deleted,
+                    "user_id": user_id,
+                    "status": "cleaned" if email_deleted > 0 else "no_data_found"
+                }
+                total_deleted += email_deleted
+            
+            # Commit all changes
+            conn.commit()
+            conn.close()
+            
+            logger.info(f"✅ Test user cleanup completed. Total records deleted: {total_deleted}")
+            
+            return {
+                "success": True,
+                "message": "Test user cleanup completed successfully",
+                "timestamp": datetime.utcnow().isoformat(),
+                "results": cleanup_results,
+                "total_records_deleted": total_deleted,
+                "emails_processed": test_emails
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Test user cleanup failed: {str(e)}")
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            return {
+                "success": False,
+                "error": f"Cleanup failed: {str(e)}",
+                "status": 500,
+                "debug_info": {"traceback": traceback.format_exc()}
+            }
+
     async def handle_admin_endpoints(self, endpoint: str, headers: Dict, params: Dict = None) -> Dict[str, Any]:
         """Handle admin endpoints with debug logging"""
         try:
@@ -3451,6 +3539,10 @@ Vidyagam • Connecting AI Innovation
                 }
                 logger.info("✅ Admin quick test completed successfully")
                 return admin_response
+            
+            elif admin_endpoint == "cleanup-test-users":
+                return await self.handle_cleanup_test_users(params)
+            
             else:
                 logger.warning(f"❌ Unknown admin endpoint: {admin_endpoint}")
                 return {"error": f"Admin endpoint '{admin_endpoint}' not implemented", "status": 404}
