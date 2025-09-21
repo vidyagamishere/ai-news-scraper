@@ -2180,13 +2180,13 @@ class AINewsRouter:
                         "onboarding_completed": True
                     }
             else:
-                # New user - create with mandatory topics
+                # New user - create with empty topics (should go through onboarding)
                 preferences = {
-                    "topics": self.get_mandatory_topics(),
+                    "topics": [],  # Empty topics for new users to select during onboarding
                     "newsletter_frequency": "weekly",
                     "email_notifications": True,
                     "content_types": ["blogs", "podcasts", "videos"],
-                    "onboarding_completed": True
+                    "onboarding_completed": False  # New users need onboarding
                 }
             
             # Add preferences to the insert/update
