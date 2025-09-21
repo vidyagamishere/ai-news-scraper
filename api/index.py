@@ -2069,17 +2069,38 @@ class AINewsRouter:
             # Build and execute dynamic INSERT statement
             columns_str = ', '.join(available_data_columns)
             placeholders = ', '.join(['?' for _ in available_data_columns])
+            insert_sql = f"INSERT OR REPLACE INTO users ({columns_str}) VALUES ({placeholders})"
             
-            cursor.execute(f"""
-                INSERT OR REPLACE INTO users ({columns_str})
-                VALUES ({placeholders})
-            """, values)
+            logger.info(f"🔧 Executing SQL: {insert_sql}")
+            logger.info(f"🔧 Values: {[str(v)[:50] + '...' if len(str(v)) > 50 else v for v in values]}")
             
-            logger.info(f"✅ User inserted with available columns: {available_data_columns}")
-            logger.info(f"📊 User preferences set: onboarding_completed={preferences['onboarding_completed']}, topics_count={len(preferences['topics'])}")
-            
-            conn.commit()
-            conn.close()
+            try:
+                cursor.execute(insert_sql, values)
+                rows_affected = cursor.rowcount
+                logger.info(f"✅ Database INSERT executed successfully, rows affected: {rows_affected}")
+                
+                # Verify the user was actually inserted
+                cursor.execute("SELECT id, email, name FROM users WHERE id = ?", (user_id,))
+                verification_result = cursor.fetchone()
+                if verification_result:
+                    logger.info(f"✅ User verification successful: ID={verification_result[0]}, Email={verification_result[1]}, Name={verification_result[2]}")
+                else:
+                    logger.error(f"❌ User verification FAILED - user not found in database after INSERT")
+                    raise Exception("User creation verification failed")
+                
+                logger.info(f"📊 User preferences set: onboarding_completed={preferences['onboarding_completed']}, topics_count={len(preferences['topics'])}")
+                
+                conn.commit()
+                logger.info(f"✅ Database transaction committed successfully")
+                
+            except Exception as db_error:
+                logger.error(f"❌ Database operation failed: {str(db_error)}")
+                logger.error(f"❌ SQL: {insert_sql}")
+                logger.error(f"❌ Values: {values}")
+                conn.rollback()
+                raise Exception(f"Database user creation failed: {str(db_error)}")
+            finally:
+                conn.close()
             
             # Create JWT token
             jwt_token = self.auth_service.create_jwt_token(token_data)
