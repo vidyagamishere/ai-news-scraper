@@ -3282,6 +3282,10 @@ Vidyagam • Connecting AI Innovation
             # Update other preference fields
             if 'user_roles' in data:
                 current_preferences['user_roles'] = data['user_roles']
+            if 'role_type' in data:
+                current_preferences['role_type'] = data['role_type']
+            if 'experience_level' in data:
+                current_preferences['experience_level'] = data['experience_level']
             if 'newsletter_frequency' in data:
                 current_preferences['newsletter_frequency'] = data['newsletter_frequency']
             if 'email_notifications' in data:
@@ -3308,14 +3312,17 @@ Vidyagam • Connecting AI Innovation
             conn.commit()
             conn.close()
             
-            # Format response
+            # Format response - use the saved preferences data
             preferences = {
-                "topics": json.loads(updated_prefs['topics']) if updated_prefs['topics'] else [],
-                "newsletter_frequency": updated_prefs['newsletter_frequency'],
-                "email_notifications": bool(updated_prefs['email_notifications']),
-                "content_types": json.loads(updated_prefs['content_types']) if updated_prefs['content_types'] else ["articles"],
-                "onboarding_completed": bool(updated_prefs['onboarding_completed']),
-                "newsletter_subscribed": bool(updated_prefs['newsletter_subscribed'])
+                "topics": current_preferences.get('topics', []),
+                "newsletter_frequency": current_preferences.get('newsletter_frequency', 'weekly'),
+                "email_notifications": bool(current_preferences.get('email_notifications', True)),
+                "content_types": current_preferences.get('content_types', ["articles"]),
+                "onboarding_completed": bool(current_preferences.get('onboarding_completed', False)),
+                "newsletter_subscribed": bool(current_preferences.get('newsletter_subscribed', True)),
+                "user_roles": current_preferences.get('user_roles', []),
+                "role_type": current_preferences.get('role_type', ''),
+                "experience_level": current_preferences.get('experience_level', '')
             }
             
             return {
