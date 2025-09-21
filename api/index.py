@@ -477,6 +477,9 @@ class AINewsRouter:
             if endpoint == "health":
                 logger.info("🏥 Routing to health handler")
                 return await self.handle_health()
+            elif endpoint == "debug-auth":
+                logger.info("🔍 Routing to debug-auth handler")
+                return await self.handle_debug_auth(headers)
             elif endpoint == "digest":
                 logger.info("📰 Routing to digest handler")
                 return await self.handle_digest(params, headers)
@@ -609,6 +612,65 @@ class AINewsRouter:
                 }
             }
     
+    async def handle_debug_auth(self, headers: Dict = None) -> Dict[str, Any]:
+        """Debug authentication token verification"""
+        try:
+            if headers is None:
+                headers = {}
+            
+            auth_header = headers.get('Authorization') or headers.get('authorization')
+            
+            debug_info = {
+                "auth_header_present": bool(auth_header),
+                "auth_header_format": "valid" if auth_header and auth_header.startswith('Bearer ') else "invalid",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            
+            if auth_header:
+                # Test token extraction
+                if auth_header.startswith('Bearer '):
+                    token = auth_header[7:]
+                    debug_info["token_extracted"] = True
+                    debug_info["token_length"] = len(token)
+                    
+                    # Test JWT verification
+                    try:
+                        user_data = self.auth_service.get_user_from_token(auth_header)
+                        debug_info["token_verification"] = "success" if user_data else "failed"
+                        
+                        if user_data:
+                            debug_info["user_id"] = user_data.get('sub')
+                            debug_info["user_email"] = user_data.get('email')
+                            
+                            # Test preference loading
+                            try:
+                                user_preferences = await self.get_user_preferences(user_data.get('sub'))
+                                debug_info["preferences_loaded"] = True
+                                debug_info["topics_count"] = len(user_preferences.get('topics', []))
+                                debug_info["topics"] = user_preferences.get('topics', [])
+                            except Exception as e:
+                                debug_info["preferences_loaded"] = False
+                                debug_info["preferences_error"] = str(e)
+                        else:
+                            debug_info["user_data"] = None
+                    except Exception as e:
+                        debug_info["token_verification"] = "error"
+                        debug_info["verification_error"] = str(e)
+                else:
+                    debug_info["token_extracted"] = False
+                    debug_info["error"] = "Invalid Bearer format"
+            
+            return {
+                "status": "debug_complete",
+                "debug_info": debug_info
+            }
+        except Exception as e:
+            return {
+                "status": "debug_error",
+                "error": str(e),
+                "traceback": traceback.format_exc()
+            }
+
     async def handle_digest(self, params: Dict = None, headers: Dict = None) -> Dict[str, Any]:
         """Get current digest content with debug info and user preference support"""
         try:
