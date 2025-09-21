@@ -898,6 +898,7 @@ class AINewsRouter:
             high_impact = len([a for a in articles if a.get("impact") == "high"])
             
             digest_response = {
+                "personalized": is_personalized and not is_preview_mode,  # Add personalized flag to main response
                 "summary": {
                     "keyPoints": [
                         f"Found {total_articles} recent AI news articles",
@@ -3252,65 +3253,55 @@ Vidyagam • Connecting AI Innovation
             if not user_id:
                 return {"error": "Invalid token payload", "status": 401}
             
-            # Update preferences in database
+            # Update preferences in users table (preferences JSONB column)
             conn = self.get_db_connection()
             cursor = conn.cursor()
             
-            # Update preferences (table schema already initialized at startup)
+            # Get current user and preferences
+            cursor.execute("SELECT preferences FROM users WHERE id = ?", (user_id,))
+            current_prefs_row = cursor.fetchone()
             
-            # Get current preferences
-            cursor.execute("SELECT * FROM user_preferences WHERE user_id = ?", (user_id,))
-            current_prefs = cursor.fetchone()
-            
-            # Prepare update data
-            update_data = {}
-            if 'topics' in data:
-                update_data['topics'] = json.dumps(data['topics'])
-            if 'user_roles' in data:
-                update_data['user_roles'] = json.dumps(data['user_roles'])
-            if 'newsletter_frequency' in data:
-                update_data['newsletter_frequency'] = data['newsletter_frequency']
-            if 'email_notifications' in data:
-                update_data['email_notifications'] = bool(data['email_notifications'])
-            if 'content_types' in data:
-                update_data['content_types'] = json.dumps(data['content_types'])
-            if 'onboarding_completed' in data:
-                update_data['onboarding_completed'] = bool(data['onboarding_completed'])
-            if 'newsletter_subscribed' in data:
-                update_data['newsletter_subscribed'] = bool(data['newsletter_subscribed'])
-            
-            update_data['updated_at'] = datetime.utcnow().isoformat()
-            
-            if current_prefs:
-                # Update existing preferences
-                set_clause = ', '.join([f"{key} = ?" for key in update_data.keys()])
-                values = list(update_data.values()) + [user_id]
-                cursor.execute(f"UPDATE user_preferences SET {set_clause} WHERE user_id = ?", values)
-                logger.info(f"📊 Updated preferences for existing user: {user_id}")
+            # Parse existing preferences or create new ones
+            if current_prefs_row and current_prefs_row[0]:
+                current_preferences = json.loads(current_prefs_row[0])
             else:
-                # Insert new preferences
-                all_fields = {
-                    'user_id': user_id,
-                    'topics': json.dumps(data.get('topics', [])),
-                    'newsletter_frequency': data.get('newsletter_frequency', 'weekly'),
-                    'email_notifications': bool(data.get('email_notifications', True)),
-                    'content_types': json.dumps(data.get('content_types', ['blogs', 'podcasts', 'videos'])),
-                    'onboarding_completed': bool(data.get('onboarding_completed', False)),
-                    'newsletter_subscribed': bool(data.get('newsletter_subscribed', False)),
-                    'created_at': datetime.utcnow().isoformat(),
-                    'updated_at': datetime.utcnow().isoformat()
-                }
-                
-                placeholders = ', '.join(['?' for _ in all_fields])
-                fields = ', '.join(all_fields.keys())
-                cursor.execute(f"INSERT INTO user_preferences ({fields}) VALUES ({placeholders})", list(all_fields.values()))
-                logger.info(f"📊 Created new preferences for user: {user_id}")
+                current_preferences = {}
             
-            # Get updated preferences to return
-            cursor.execute("SELECT * FROM user_preferences WHERE user_id = ?", (user_id,))
-            updated_prefs = cursor.fetchone()
+            # Handle topic format normalization
+            if 'topics' in data:
+                topics = data['topics']
+                if topics and isinstance(topics[0], dict):
+                    # Convert topic objects to topic IDs for filtering compatibility
+                    topic_ids = [topic['id'] for topic in topics if topic.get('selected', True)]
+                    logger.info(f"📊 Converting topic objects to IDs: {len(topics)} objects → {len(topic_ids)} IDs")
+                    current_preferences['topics'] = topic_ids
+                else:
+                    # Already in ID format
+                    current_preferences['topics'] = topics
             
-            # Get user data
+            # Update other preference fields
+            if 'user_roles' in data:
+                current_preferences['user_roles'] = data['user_roles']
+            if 'newsletter_frequency' in data:
+                current_preferences['newsletter_frequency'] = data['newsletter_frequency']
+            if 'email_notifications' in data:
+                current_preferences['email_notifications'] = bool(data['email_notifications'])
+            if 'content_types' in data:
+                current_preferences['content_types'] = data['content_types']
+            if 'onboarding_completed' in data:
+                current_preferences['onboarding_completed'] = bool(data['onboarding_completed'])
+            if 'newsletter_subscribed' in data:
+                current_preferences['newsletter_subscribed'] = bool(data['newsletter_subscribed'])
+            
+            # Update timestamp
+            current_preferences['updated_at'] = datetime.utcnow().isoformat()
+            
+            # Save updated preferences back to users table
+            preferences_json = json.dumps(current_preferences)
+            cursor.execute("UPDATE users SET preferences = ? WHERE id = ?", (preferences_json, user_id))
+            logger.info(f"📊 Updated preferences in users table for user: {user_id}")
+            
+            # Get updated user data to return
             cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
             user_data = cursor.fetchone()
             
