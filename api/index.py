@@ -1253,7 +1253,7 @@ class AINewsRouter:
         return categorized
     
     def get_mandatory_topics(self) -> List[Dict]:
-        """Get mandatory topics that should be assigned to all users"""
+        """Get mandatory topics that should be assigned to all users during onboarding"""
         return [
             {
                 'id': 'artificial_intelligence',
