@@ -477,9 +477,6 @@ class AINewsRouter:
             if endpoint == "health":
                 logger.info("🏥 Routing to health handler")
                 return await self.handle_health()
-            elif endpoint == "debug-auth":
-                logger.info("🔍 Routing to debug-auth handler")
-                return await self.handle_debug_auth(headers)
             elif endpoint == "digest":
                 logger.info("📰 Routing to digest handler")
                 return await self.handle_digest(params, headers)
@@ -611,65 +608,6 @@ class AINewsRouter:
                     "traceback": traceback.format_exc()
                 }
             }
-    
-    async def handle_debug_auth(self, headers: Dict = None) -> Dict[str, Any]:
-        """Debug authentication token verification"""
-        try:
-            if headers is None:
-                headers = {}
-            
-            auth_header = headers.get('Authorization') or headers.get('authorization')
-            
-            debug_info = {
-                "auth_header_present": bool(auth_header),
-                "auth_header_format": "valid" if auth_header and auth_header.startswith('Bearer ') else "invalid",
-                "timestamp": datetime.utcnow().isoformat()
-            }
-            
-            if auth_header:
-                # Test token extraction
-                if auth_header.startswith('Bearer '):
-                    token = auth_header[7:]
-                    debug_info["token_extracted"] = True
-                    debug_info["token_length"] = len(token)
-                    
-                    # Test JWT verification
-                    try:
-                        user_data = self.auth_service.get_user_from_token(auth_header)
-                        debug_info["token_verification"] = "success" if user_data else "failed"
-                        
-                        if user_data:
-                            debug_info["user_id"] = user_data.get('sub')
-                            debug_info["user_email"] = user_data.get('email')
-                            
-                            # Test preference loading
-                            try:
-                                user_preferences = await self.get_user_preferences(user_data.get('sub'))
-                                debug_info["preferences_loaded"] = True
-                                debug_info["topics_count"] = len(user_preferences.get('topics', []))
-                                debug_info["topics"] = user_preferences.get('topics', [])
-                            except Exception as e:
-                                debug_info["preferences_loaded"] = False
-                                debug_info["preferences_error"] = str(e)
-                        else:
-                            debug_info["user_data"] = None
-                    except Exception as e:
-                        debug_info["token_verification"] = "error"
-                        debug_info["verification_error"] = str(e)
-                else:
-                    debug_info["token_extracted"] = False
-                    debug_info["error"] = "Invalid Bearer format"
-            
-            return {
-                "status": "debug_complete",
-                "debug_info": debug_info
-            }
-        except Exception as e:
-            return {
-                "status": "debug_error",
-                "error": str(e),
-                "traceback": traceback.format_exc()
-            }
 
     async def handle_digest(self, params: Dict = None, headers: Dict = None) -> Dict[str, Any]:
         """Get current digest content with debug info and user preference support"""
@@ -698,10 +636,16 @@ class AINewsRouter:
                 logger.info("📱 Preview dashboard mode - no authentication, showing general content")
             else:
                 try:
+                    # Add detailed logging for auth debugging
+                    logger.info(f"🔐 Auth header received: {'Bearer ...' if auth_header.startswith('Bearer ') else 'Invalid format'}")
                     user_data = self.auth_service.get_user_from_token(auth_header)
+                    logger.info(f"🔐 Token verification result: {'SUCCESS' if user_data else 'FAILED'}")
+                    
                     if user_data:
                         # Authenticated user - get personalized content
+                        logger.info(f"🔐 User data: ID={user_data.get('sub')}, Email={user_data.get('email')}")
                         user_preferences = await self.get_user_preferences(user_data.get('sub'))
+                        logger.info(f"🎯 User preferences loaded: {len(user_preferences.get('topics', []))} topics")
                         is_personalized = True
                         is_preview_mode = False
                         logger.info(f"🎯 Authenticated dashboard mode - personalized content for user: {user_data.get('email')}")
@@ -713,6 +657,7 @@ class AINewsRouter:
                     # Auth failed - treat as preview
                     is_preview_mode = True
                     logger.warning(f"⚠️ Auth failed, using preview mode: {e}")
+                    logger.warning(f"⚠️ Auth exception details: {traceback.format_exc()}")
             
             # First check if there are any articles at all
             conn = self.get_db_connection()
