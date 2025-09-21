@@ -3377,31 +3377,29 @@ Vidyagam • Connecting AI Innovation
                 conn.close()
                 return {"error": "User not found", "status": 404}
             
-            # Get user preferences
-            cursor.execute("SELECT * FROM user_preferences WHERE user_id = ?", (user_id,))
-            user_prefs = cursor.fetchone()
+            # Get user preferences from users.preferences JSONB column (not user_preferences table)
+            user_preferences_json = user_data['preferences'] if user_data and len(user_data) > 6 else '{}'
             
             conn.close()
             
-            # Format preferences
-            preferences = {
-                "topics": [],
-                "newsletter_frequency": "weekly",
-                "email_notifications": True,
-                "content_types": ["blogs", "podcasts", "videos"],
-                "onboarding_completed": False,
-                "newsletter_subscribed": False
-            }
+            # Parse preferences from JSONB column
+            try:
+                user_prefs = json.loads(user_preferences_json) if user_preferences_json else {}
+            except (json.JSONDecodeError, TypeError):
+                user_prefs = {}
             
-            if user_prefs:
-                preferences.update({
-                    "topics": json.loads(user_prefs['topics']) if user_prefs['topics'] else [],
-                    "newsletter_frequency": user_prefs['newsletter_frequency'],
-                    "email_notifications": bool(user_prefs['email_notifications']),
-                    "content_types": json.loads(user_prefs['content_types']) if user_prefs['content_types'] else ["blogs", "podcasts", "videos"],
-                    "onboarding_completed": bool(user_prefs['onboarding_completed']),
-                    "newsletter_subscribed": bool(user_prefs['newsletter_subscribed'])
-                })
+            # Format preferences with all fields including enhanced ones
+            preferences = {
+                "topics": user_prefs.get('topics', []),
+                "newsletter_frequency": user_prefs.get('newsletter_frequency', 'weekly'),
+                "email_notifications": bool(user_prefs.get('email_notifications', True)),
+                "content_types": user_prefs.get('content_types', ["articles", "podcasts", "videos"]),
+                "onboarding_completed": bool(user_prefs.get('onboarding_completed', False)),
+                "newsletter_subscribed": bool(user_prefs.get('newsletter_subscribed', True)),
+                "user_roles": user_prefs.get('user_roles', []),
+                "role_type": user_prefs.get('role_type', ''),
+                "experience_level": user_prefs.get('experience_level', '')
+            }
             
             return {
                 "id": user_data['id'],
