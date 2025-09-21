@@ -479,7 +479,7 @@ class AINewsRouter:
                 return await self.handle_health()
             elif endpoint == "digest":
                 logger.info("📰 Routing to digest handler")
-                return await self.handle_digest(params)
+                return await self.handle_digest(params, headers)
             elif endpoint == "sources":
                 logger.info("🔗 Routing to sources handler")
                 return await self.handle_sources()
@@ -609,10 +609,48 @@ class AINewsRouter:
                 }
             }
     
-    async def handle_digest(self, params: Dict = None) -> Dict[str, Any]:
-        """Get current digest content with debug info"""
+    async def handle_digest(self, params: Dict = None, headers: Dict = None) -> Dict[str, Any]:
+        """Get current digest content with debug info and user preference support"""
         try:
             logger.info("📰 Processing digest request")
+            
+            if params is None:
+                params = {}
+            if headers is None:
+                headers = {}
+            
+            # Check for content_type parameter (frontend filtering)
+            requested_content_type = params.get('content_type')
+            if requested_content_type:
+                logger.info(f"📂 Content type filter requested: {requested_content_type}")
+            
+            # Determine if this is a preview or authenticated dashboard request
+            user_preferences = None
+            is_personalized = False
+            is_preview_mode = False
+            auth_header = headers.get('Authorization') or headers.get('authorization')
+            
+            # Check if this is explicitly a preview request (no auth header or invalid token)
+            if not auth_header:
+                is_preview_mode = True
+                logger.info("📱 Preview dashboard mode - no authentication, showing general content")
+            else:
+                try:
+                    user_data = self.auth_service.get_user_from_token(auth_header)
+                    if user_data:
+                        # Authenticated user - get personalized content
+                        user_preferences = await self.get_user_preferences(user_data.get('sub'))
+                        is_personalized = True
+                        is_preview_mode = False
+                        logger.info(f"🎯 Authenticated dashboard mode - personalized content for user: {user_data.get('email')}")
+                    else:
+                        # Invalid token - treat as preview
+                        is_preview_mode = True
+                        logger.info("📱 Invalid token - using preview dashboard mode")
+                except Exception as e:
+                    # Auth failed - treat as preview
+                    is_preview_mode = True
+                    logger.warning(f"⚠️ Auth failed, using preview mode: {e}")
             
             # First check if there are any articles at all
             conn = self.get_db_connection()
@@ -641,9 +679,6 @@ class AINewsRouter:
                 logger.info("✅ Sample articles created")
             
             conn.close()
-            
-            if params is None:
-                params = {}
             
             # Get articles from database
             conn = self.get_db_connection()
@@ -680,6 +715,74 @@ class AINewsRouter:
                 })
             
             conn.close()
+            
+            # Apply content filtering - PREVIEW MODE gets NO personalization
+            should_apply_filtering = requested_content_type or (not is_preview_mode and is_personalized and user_preferences)
+            
+            if should_apply_filtering:
+                # Convert articles to format expected by categorization functions
+                articles_for_filtering = []
+                for article in articles:
+                    articles_for_filtering.append({
+                        "title": article["title"],
+                        "summary": article["content_summary"],
+                        "source": article["source"],
+                        "url": article["url"],
+                        "significance_score": article["significanceScore"]
+                    })
+                
+                # Apply filtering logic based on mode
+                if is_preview_mode:
+                    # PREVIEW MODE: Only content type filtering, NO personalization
+                    if requested_content_type and requested_content_type != "all_sources":
+                        filtered_articles_data = self.categorize_articles_by_content_type(
+                            articles_for_filtering, requested_content_type
+                        )
+                        logger.info(f"📱 Preview mode: Applied content type filter '{requested_content_type}'")
+                    else:
+                        filtered_articles_data = articles_for_filtering
+                        logger.info("📱 Preview mode: Showing all content types without personalization")
+                else:
+                    # AUTHENTICATED MODE: Apply personalization if available
+                    if requested_content_type and requested_content_type != "all_sources":
+                        if is_personalized and user_preferences:
+                            # Apply both content type and preference filtering
+                            filtered_articles_data = self.categorize_articles_with_preferences(
+                                articles_for_filtering, requested_content_type, user_preferences
+                            )
+                            logger.info(f"🎯 Authenticated mode: Applied personalized '{requested_content_type}' filter")
+                        else:
+                            # Apply only content type filtering
+                            filtered_articles_data = self.categorize_articles_by_content_type(
+                                articles_for_filtering, requested_content_type
+                            )
+                            logger.info(f"🎯 Authenticated mode: Applied content type filter '{requested_content_type}'")
+                    elif is_personalized and user_preferences:
+                        # Apply only preference filtering (for all_sources or no content_type)
+                        filtered_articles_data = self.filter_articles_by_user_preferences(
+                            articles_for_filtering, user_preferences
+                        )
+                        logger.info("🎯 Authenticated mode: Applied personalized preferences filter")
+                    else:
+                        filtered_articles_data = articles_for_filtering
+                        logger.info("🎯 Authenticated mode: No personalization available")
+                
+                # Map filtered results back to original article format
+                filtered_urls = set(article.get("url", "") for article in filtered_articles_data)
+                articles = [article for article in articles if article.get("url", "") in filtered_urls]
+                
+                # Reorder articles based on filtering results
+                url_to_article = {article.get("url", ""): article for article in articles}
+                reordered_articles = []
+                for filtered_article in filtered_articles_data:
+                    url = filtered_article.get("url", "")
+                    if url in url_to_article:
+                        reordered_articles.append(url_to_article[url])
+                articles = reordered_articles
+                
+                logger.info(f"✅ Content filtering applied: {len(articles)} articles remaining")
+            else:
+                logger.info("📰 No filtering applied - showing all articles")
             
             # Organize content by type
             content_by_type = {"blog": [], "audio": [], "video": []}
@@ -746,7 +849,13 @@ class AINewsRouter:
                 "debug_info": {
                     "articles_processed": total_articles,
                     "database_query_time": "< 1ms",
-                    "content_distribution": {k: len(v) for k, v in content_by_type.items()}
+                    "content_distribution": {k: len(v) for k, v in content_by_type.items()},
+                    "is_personalized": is_personalized,
+                    "is_preview_mode": is_preview_mode,
+                    "dashboard_mode": "preview" if is_preview_mode else "authenticated",
+                    "content_type_filter": requested_content_type,
+                    "filtering_applied": bool(should_apply_filtering if 'should_apply_filtering' in locals() else False),
+                    "personalization_enabled": not is_preview_mode and is_personalized
                 }
             }
             
@@ -1013,7 +1122,7 @@ class AINewsRouter:
         }
     
     async def handle_content_by_type(self, content_type: str, headers: Dict, params: Dict = None) -> Dict[str, Any]:
-        """Get content filtered by type (blogs, podcasts, videos, etc.)"""
+        """Get content filtered by type (blogs, podcasts, videos, etc.) with user preference support"""
         try:
             logger.info(f"📂 Processing content request for type: {content_type}")
             
@@ -1026,18 +1135,32 @@ class AINewsRouter:
                     "available_types": list(CONTENT_TYPES.keys())
                 }
             
+            # Get user preferences if authenticated
+            user_preferences = None
+            is_personalized = False
+            auth_header = headers.get('Authorization') or headers.get('authorization')
+            
+            if auth_header:
+                try:
+                    user_data = self.auth_service.get_user_from_token(auth_header)
+                    if user_data:
+                        user_preferences = await self.get_user_preferences(user_data.get('sub'))
+                        is_personalized = True
+                        logger.info(f"🎯 Using personalized content for user: {user_data.get('email')}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not get user preferences: {e}")
+            
             # Get database connection
             conn = self.get_db_connection()
             cursor = conn.cursor()
             
-            # Get articles from database
-            # For now, we'll return all recent articles but categorize them by type
+            # Get articles from database (expand time range for better results)
             cursor.execute("""
                 SELECT title, summary, url, source, published_date, significance_score
                 FROM articles 
-                WHERE published_date >= datetime('now', '-7 days')
+                WHERE published_date >= datetime('now', '-14 days')
                 ORDER BY significance_score DESC, published_date DESC
-                LIMIT 50
+                LIMIT 100
             """)
             
             all_articles = []
@@ -1054,8 +1177,11 @@ class AINewsRouter:
             
             conn.close()
             
-            # Categorize articles based on content type
-            categorized_articles = self.categorize_articles_by_content_type(all_articles, content_type)
+            # Apply preference-based filtering and categorization
+            if is_personalized and user_preferences:
+                categorized_articles = self.categorize_articles_with_preferences(all_articles, content_type, user_preferences)
+            else:
+                categorized_articles = self.categorize_articles_by_content_type(all_articles, content_type)
             
             # Limit results based on content type
             max_articles = 20 if content_type == "all_sources" else 10
@@ -1069,6 +1195,7 @@ class AINewsRouter:
                 "total_available": len(categorized_articles),
                 "sources_available": len(set(article.get("source", "") for article in limited_articles)),
                 "user_tier": "free",  # For now, default to free
+                "is_personalized": is_personalized,
                 "timestamp": datetime.utcnow().isoformat(),
                 "featured_sources": []
             }
@@ -1124,6 +1251,494 @@ class AINewsRouter:
             categorized.extend(remaining_articles[:max(0, 10 - len(categorized))])
         
         return categorized
+    
+    def get_mandatory_topics(self) -> List[Dict]:
+        """Get mandatory topics that should be assigned to all users"""
+        return [
+            {
+                'id': 'artificial_intelligence',
+                'name': 'Artificial Intelligence',
+                'description': 'General AI developments and breakthroughs',
+                'category': 'technology',
+                'selected': True
+            },
+            {
+                'id': 'machine_learning',
+                'name': 'Machine Learning',
+                'description': 'ML algorithms and techniques',
+                'category': 'technology',
+                'selected': True
+            }
+        ]
+
+    async def get_user_preferences(self, user_id: str) -> Dict:
+        """Get user preferences from database (users table preferences column)"""
+        try:
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+            
+            # Query the users table where preferences are actually stored
+            cursor.execute("""
+                SELECT preferences 
+                FROM users 
+                WHERE id = ?
+            """, (user_id,))
+            
+            prefs_row = cursor.fetchone()
+            conn.close()
+            
+            if prefs_row and prefs_row[0]:
+                import json
+                preferences = json.loads(prefs_row[0])
+                
+                # Extract topics - handle both formats
+                topics = []
+                raw_topics = preferences.get("topics", [])
+                
+                if isinstance(raw_topics, list):
+                    for topic in raw_topics:
+                        if isinstance(topic, dict):
+                            # Handle format: [{"id": "machine_learning", "selected": True}, ...]
+                            if topic.get("selected", False):
+                                topics.append(topic.get("id", ""))
+                        elif isinstance(topic, str):
+                            # Handle format: ["machine_learning", "nlp", ...]
+                            topics.append(topic)
+                
+                # Extract content types - handle both formats  
+                content_types = preferences.get("content_types", ["blogs", "podcasts", "videos"])
+                
+                # Map old format to new format
+                if "articles" in content_types:
+                    content_types = ["blogs", "podcasts", "videos"]
+                
+                logger.info(f"🎯 User preferences loaded - Topics: {topics}, Content Types: {content_types}")
+                
+                return {
+                    "topics": topics,
+                    "content_types": content_types,
+                    "newsletter_frequency": preferences.get("newsletter_frequency", "weekly"),
+                    "email_notifications": preferences.get("email_notifications", True),
+                    "onboarding_completed": preferences.get("onboarding_completed", True)
+                }
+            else:
+                logger.info(f"🎯 No preferences found for user {user_id}, using defaults")
+                # Return default preferences
+                return {
+                    "topics": [],
+                    "content_types": ["blogs", "podcasts", "videos"],
+                    "newsletter_frequency": "weekly",
+                    "email_notifications": True,
+                    "onboarding_completed": False
+                }
+                
+        except Exception as e:
+            logger.error(f"❌ Error getting user preferences: {e}")
+            import traceback
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            return {
+                "topics": [],
+                "content_types": ["blogs", "podcasts", "videos"],
+                "newsletter_frequency": "weekly",
+                "email_notifications": True,
+                "onboarding_completed": False
+            }
+    
+    def categorize_articles_with_preferences(self, articles: List[Dict], content_type: str, user_preferences: Dict) -> List[Dict]:
+        """Categorize articles based on content type AND user preferences"""
+        
+        if content_type == "all_sources":
+            # For all sources, apply user's preferred content types and topics
+            return self.filter_articles_by_user_preferences(articles, user_preferences)
+        
+        # First apply basic content type filtering
+        basic_categorized = self.categorize_articles_by_content_type(articles, content_type)
+        
+        # Then apply user preference filtering to prioritize relevant topics
+        preference_filtered = self.filter_articles_by_user_preferences(basic_categorized, user_preferences)
+        
+        # If we don't have enough preference-filtered content, supplement with basic categorized content
+        if len(preference_filtered) < 5:
+            # Add non-duplicate articles from basic categorization
+            seen_urls = set(article.get("url", "") for article in preference_filtered)
+            for article in basic_categorized:
+                if article.get("url", "") not in seen_urls and len(preference_filtered) < 10:
+                    preference_filtered.append(article)
+                    seen_urls.add(article.get("url", ""))
+        
+        return preference_filtered
+    
+    def filter_articles_by_user_preferences(self, articles: List[Dict], user_preferences: Dict) -> List[Dict]:
+        """Filter and prioritize articles based on user's topic preferences"""
+        
+        user_topics = user_preferences.get("topics", [])
+        user_content_types = user_preferences.get("content_types", [])
+        
+        # If user has no preferences at all, return all articles
+        if not user_topics and not user_content_types:
+            return articles
+        
+        logger.info(f"🎯 Filtering with user preferences - Topics: {user_topics}, Content Types: {user_content_types}")
+        
+        # Comprehensive topic keywords - 100 significant meta words per topic
+        # Handle different topic ID formats from database
+        topic_keywords = {
+            "machine_learning": [
+                # Core ML Terms
+                "machine learning", "ml", "artificial intelligence", "ai", "neural network", "deep learning", 
+                "algorithm", "model", "training", "supervised", "unsupervised", "reinforcement learning",
+                "classification", "regression", "clustering", "prediction", "optimization", "inference",
+                "backpropagation", "gradient descent", "overfitting", "underfitting", "bias", "variance",
+                
+                # ML Frameworks & Tools
+                "tensorflow", "pytorch", "scikit-learn", "keras", "pandas", "numpy", "matplotlib", "jupyter",
+                "anaconda", "colab", "kaggle", "mlflow", "wandb", "tensorboard", "huggingface", "transformers",
+                
+                # ML Algorithms & Techniques
+                "decision tree", "random forest", "svm", "support vector", "linear regression", "logistic regression",
+                "k-means", "kmeans", "dbscan", "pca", "principal component", "feature selection", "dimensionality reduction",
+                "ensemble", "bagging", "boosting", "xgboost", "lightgbm", "catboost", "adaboost",
+                
+                # Deep Learning Specific
+                "cnn", "convolutional", "rnn", "recurrent", "lstm", "gru", "attention", "transformer",
+                "autoencoder", "gan", "generative adversarial", "vae", "variational autoencoder", "dropout",
+                "batch normalization", "activation function", "relu", "sigmoid", "tanh", "softmax",
+                
+                # ML Operations & Deployment
+                "mlops", "deployment", "production", "pipeline", "model serving", "feature store", "data drift",
+                "model monitoring", "a/b testing", "hyperparameter tuning", "cross validation", "grid search",
+                "automated ml", "automl", "model selection", "performance metrics", "accuracy", "precision", "recall"
+            ],
+            
+            "computer_vision": [
+                # Core CV Terms
+                "computer vision", "cv", "image processing", "visual recognition", "object detection", "image classification",
+                "facial recognition", "face detection", "image segmentation", "semantic segmentation", "instance segmentation",
+                "edge detection", "feature extraction", "image enhancement", "image restoration", "image synthesis",
+                
+                # CV Algorithms & Architectures
+                "cnn", "convolutional neural network", "resnet", "vgg", "alexnet", "inception", "mobilenet",
+                "yolo", "you only look once", "r-cnn", "faster r-cnn", "mask r-cnn", "ssd", "single shot detector",
+                "u-net", "densenet", "efficientnet", "vision transformer", "vit", "detr",
+                
+                # CV Applications
+                "autonomous vehicles", "self-driving", "medical imaging", "satellite imagery", "surveillance", "security",
+                "augmented reality", "ar", "virtual reality", "vr", "3d reconstruction", "stereo vision", "depth estimation",
+                "optical character recognition", "ocr", "document analysis", "barcode scanning", "qr code",
+                
+                # CV Tools & Libraries
+                "opencv", "pillow", "pil", "scikit-image", "imageio", "albumentations", "torchvision", "tensorflow-gpu",
+                "detectron2", "mmdetection", "ultralytics", "roboflow", "labelimg", "coco dataset", "imagenet",
+                
+                # CV Techniques
+                "data augmentation", "transfer learning", "fine-tuning", "feature matching", "template matching",
+                "histogram equalization", "gaussian blur", "morphological operations", "contour detection", "hough transform",
+                "sift", "surf", "orb", "corner detection", "optical flow", "tracking", "kalman filter"
+            ],
+            
+            "natural_language_processing": [
+                # Core NLP Terms
+                "natural language processing", "nlp", "text processing", "language model", "large language model", "llm",
+                "text mining", "text analytics", "computational linguistics", "language understanding", "language generation",
+                "speech recognition", "speech synthesis", "text-to-speech", "speech-to-text", "voice assistant",
+                
+                # NLP Models & Architectures
+                "transformer", "bert", "gpt", "chatgpt", "gpt-3", "gpt-4", "claude", "palm", "lamda", "t5",
+                "roberta", "electra", "deberta", "xlnet", "albert", "distilbert", "bart", "pegasus",
+                "encoder-decoder", "seq2seq", "attention mechanism", "self-attention", "cross-attention",
+                
+                # NLP Tasks & Applications
+                "sentiment analysis", "named entity recognition", "ner", "part-of-speech tagging", "pos tagging",
+                "machine translation", "text summarization", "question answering", "chatbot", "conversational ai",
+                "text classification", "document classification", "spam detection", "language detection",
+                "topic modeling", "information extraction", "relation extraction", "coreference resolution",
+                
+                # NLP Tools & Libraries
+                "spacy", "nltk", "transformers", "huggingface", "openai api", "anthropic", "tokenization", "word2vec",
+                "glove", "fasttext", "embeddings", "word embeddings", "sentence embeddings", "bert embeddings",
+                "tensorflow text", "pytorch text", "torchtext", "datasets", "tokenizers", "sentencepiece",
+                
+                # NLP Techniques
+                "preprocessing", "stemming", "lemmatization", "stop words", "n-grams", "tf-idf", "bag of words",
+                "language modeling", "perplexity", "bleu score", "rouge score", "prompt engineering", "few-shot learning",
+                "zero-shot learning", "in-context learning", "fine-tuning", "rlhf", "reinforcement learning human feedback"
+            ],
+            
+            "robotics": [
+                # Core Robotics Terms
+                "robotics", "robot", "autonomous robot", "humanoid robot", "industrial robot", "service robot",
+                "mobile robot", "robotic arm", "manipulator", "end effector", "actuator", "sensor", "servo",
+                "stepper motor", "encoder", "lidar", "camera", "ultrasonic sensor", "imu", "gyroscope", "accelerometer",
+                
+                # Robotics Software & Frameworks
+                "ros", "robot operating system", "ros2", "gazebo", "rviz", "moveit", "navigation stack", "slam",
+                "simultaneous localization mapping", "path planning", "motion planning", "trajectory planning",
+                "control systems", "pid controller", "kalman filter", "particle filter", "occupancy grid",
+                
+                # Robotics Applications
+                "autonomous vehicles", "drones", "uav", "unmanned aerial vehicle", "warehouse automation", "pick and place",
+                "assembly line", "quality inspection", "surgical robot", "medical robotics", "rehabilitation robotics",
+                "agricultural robotics", "mining robotics", "space robotics", "underwater robotics", "rescue robotics",
+                
+                # AI in Robotics
+                "robot learning", "imitation learning", "reinforcement learning robotics", "computer vision robotics",
+                "object recognition", "grasp planning", "manipulation", "dexterous manipulation", "human-robot interaction",
+                "social robotics", "collaborative robotics", "cobot", "safety systems", "fault tolerance",
+                
+                # Hardware & Mechanics
+                "kinematics", "inverse kinematics", "dynamics", "forward kinematics", "degrees of freedom", "workspace",
+                "singularity", "jacobian", "force control", "impedance control", "compliance", "stiffness",
+                "mechanical design", "3d printing", "cad", "simulation", "digital twin", "mechatronics"
+            ],
+            
+            "ai_ethics": [
+                # Core Ethics Terms
+                "ai ethics", "artificial intelligence ethics", "algorithmic bias", "bias detection", "fairness", "equity",
+                "discrimination", "responsible ai", "trustworthy ai", "ethical ai", "ai governance", "ai regulation",
+                "transparency", "explainability", "interpretability", "accountability", "auditing", "algorithmic auditing",
+                
+                # Privacy & Security
+                "privacy", "data privacy", "gdpr", "data protection", "differential privacy", "federated learning",
+                "homomorphic encryption", "secure computation", "adversarial attacks", "robustness", "safety",
+                "ai safety", "alignment problem", "value alignment", "control problem", "existential risk",
+                
+                # Social Impact
+                "social impact", "digital divide", "algorithmic justice", "civil rights", "human rights",
+                "employment impact", "job displacement", "automation", "economic inequality", "surveillance",
+                "facial recognition ethics", "predictive policing", "criminal justice", "hiring bias", "loan discrimination",
+                
+                # Governance & Policy
+                "ai policy", "regulation", "compliance", "standards", "certification", "risk assessment",
+                "impact assessment", "algorithmic impact assessment", "ethics board", "review process",
+                "stakeholder engagement", "public participation", "democratic participation", "inclusive design",
+                
+                # Technical Solutions
+                "bias mitigation", "debiasing", "fairness metrics", "demographic parity", "equalized odds",
+                "calibration", "counterfactual fairness", "individual fairness", "group fairness",
+                "explainable ai", "xai", "lime", "shap", "feature importance", "model cards", "datasheets",
+                "algorithmic transparency", "open source", "reproducibility", "documentation", "ethical guidelines"
+            ],
+            
+            "generative_ai": [
+                # Core Generative AI Terms
+                "generative ai", "generative artificial intelligence", "synthetic data", "artificial content", "generated content",
+                "creative ai", "ai art", "ai music", "ai writing", "content generation", "media synthesis",
+                "deepfake", "synthetic media", "artificial media", "procedural generation", "computational creativity",
+                
+                # Generative Models
+                "gan", "generative adversarial network", "vae", "variational autoencoder", "diffusion model",
+                "stable diffusion", "dall-e", "dall-e 2", "midjourney", "imagen", "firefly", "leonardo ai",
+                "autoregressive model", "flow-based model", "normalizing flow", "energy-based model",
+                
+                # Text Generation
+                "gpt", "chatgpt", "gpt-3", "gpt-4", "language generation", "text generation", "story generation",
+                "code generation", "copilot", "codex", "palm", "claude", "bard", "llama", "alpaca",
+                "prompt engineering", "prompt design", "few-shot prompting", "chain of thought", "instruction tuning",
+                
+                # Image Generation
+                "text-to-image", "image generation", "image synthesis", "style transfer", "neural style transfer",
+                "super resolution", "image upscaling", "inpainting", "outpainting", "image editing", "photo manipulation",
+                "artistic style", "digital art", "concept art", "illustration", "photorealism", "stylized",
+                
+                # Audio & Video Generation
+                "audio generation", "music generation", "voice synthesis", "speech synthesis", "voice cloning",
+                "video generation", "video synthesis", "animation", "3d generation", "neural rendering",
+                "text-to-speech", "text-to-video", "voice conversion", "music composition", "sound design",
+                
+                # Applications & Ethics
+                "personalization", "recommendation", "content creation", "marketing", "advertising", "entertainment",
+                "education", "training data", "data augmentation", "simulation", "virtual environments",
+                "intellectual property", "copyright", "attribution", "ownership", "authenticity", "detection"
+            ],
+            
+            "ai_research": [
+                # Research Institutions & Labs
+                "openai", "deepmind", "anthropic", "google ai", "microsoft research", "facebook ai", "meta ai",
+                "stanford ai lab", "mit csail", "berkeley ai", "carnegie mellon", "oxford ai", "cambridge ai",
+                "nvidia research", "ibm research", "amazon science", "apple ml", "tesla ai", "spacex ai",
+                
+                # Academic Conferences
+                "neurips", "icml", "iclr", "aaai", "ijcai", "acl", "emnlp", "naacl", "cvpr", "iccv", "eccv",
+                "icra", "iros", "rss", "corl", "aistats", "uai", "colt", "aamas", "kdd", "www", "sigir",
+                
+                # Research Areas
+                "artificial general intelligence", "agi", "machine consciousness", "artificial consciousness",
+                "cognitive architecture", "neural architecture search", "nas", "automated machine learning", "automl",
+                "meta-learning", "few-shot learning", "zero-shot learning", "transfer learning", "continual learning",
+                "lifelong learning", "catastrophic forgetting", "domain adaptation", "multi-task learning",
+                
+                # Theoretical Foundations
+                "computational complexity", "sample complexity", "pac learning", "statistical learning theory",
+                "information theory", "probability theory", "optimization theory", "game theory", "mechanism design",
+                "causal inference", "causality", "graph neural networks", "geometric deep learning",
+                
+                # Emerging Research
+                "quantum machine learning", "neuromorphic computing", "edge ai", "tinyml", "federated learning",
+                "distributed learning", "blockchain ai", "ai for science", "scientific machine learning",
+                "physics-informed neural networks", "neural ode", "graph transformer", "attention mechanism",
+                
+                # Research Methods
+                "empirical study", "theoretical analysis", "ablation study", "benchmark", "dataset", "evaluation metrics",
+                "reproducibility", "open science", "peer review", "arxiv", "preprint", "journal publication",
+                "research methodology", "experimental design", "statistical significance", "hypothesis testing"
+            ],
+            
+            "industry_applications": [
+                # Tech Companies
+                "google", "microsoft", "amazon", "apple", "meta", "facebook", "netflix", "uber", "airbnb",
+                "tesla", "nvidia", "intel", "amd", "qualcomm", "salesforce", "oracle", "sap", "adobe",
+                "spotify", "zoom", "slack", "dropbox", "github", "gitlab", "atlassian", "servicenow",
+                
+                # Industries
+                "fintech", "healthtech", "edtech", "retailtech", "insurtech", "regtech", "legaltech", "proptech",
+                "automotive", "manufacturing", "logistics", "supply chain", "e-commerce", "digital marketing",
+                "cybersecurity", "cloud computing", "telecommunications", "media", "entertainment", "gaming",
+                
+                # Business Applications
+                "customer service", "chatbot", "virtual assistant", "recommendation system", "personalization",
+                "fraud detection", "risk assessment", "credit scoring", "algorithmic trading", "robo-advisor",
+                "predictive maintenance", "quality control", "inventory management", "demand forecasting",
+                "price optimization", "marketing automation", "lead generation", "customer segmentation",
+                
+                # Enterprise Solutions
+                "enterprise ai", "business intelligence", "data analytics", "process automation", "rpa",
+                "robotic process automation", "intelligent automation", "document processing", "ocr",
+                "knowledge management", "decision support", "workflow optimization", "resource planning",
+                
+                # Deployment & Operations
+                "cloud deployment", "edge computing", "model serving", "api", "microservices", "containerization",
+                "kubernetes", "docker", "scalability", "performance optimization", "cost optimization",
+                "monitoring", "logging", "metrics", "alerting", "incident response", "sla", "uptime",
+                "production readiness", "mlops", "devops", "ci/cd", "continuous integration", "continuous deployment"
+            ]
+        }
+        
+        # Add alias mappings for database topic IDs
+        topic_keywords.update({
+            "nlp": topic_keywords["natural_language_processing"],  # alias
+            "ai_research": topic_keywords["ai_research"],
+            "ai_industry": topic_keywords["industry_applications"],  # alias
+            "ai_startups": topic_keywords["industry_applications"],  # alias for startups
+            "ai_ethics": topic_keywords["ai_ethics"]
+        })
+        
+        scored_articles = []
+        
+        for article in articles:
+            title_lower = (article.get("title", "") or "").lower()
+            summary_lower = (article.get("summary", "") or "").lower()
+            source_lower = (article.get("source", "") or "").lower()
+            content_text = f"{title_lower} {summary_lower} {source_lower}"
+            
+            # Calculate preference score
+            preference_score = 0
+            
+            # Score based on user's selected topics
+            for user_topic in user_topics:
+                if user_topic in topic_keywords:
+                    topic_keyword_list = topic_keywords[user_topic]
+                    topic_matches = sum(1 for keyword in topic_keyword_list if keyword in content_text)
+                    preference_score += topic_matches * 2  # Higher weight for topic matches
+            
+            # If user has no topics selected, give a base preference score for general AI content
+            if not user_topics:
+                # Score general AI content when no specific topics are selected
+                ai_general_keywords = ["ai", "artificial intelligence", "machine learning", "deep learning", 
+                                     "neural network", "algorithm", "model", "technology", "innovation"]
+                general_matches = sum(1 for keyword in ai_general_keywords if keyword in content_text)
+                preference_score += general_matches * 1  # Lower weight for general matches
+            
+            # Enhanced content type keywords for precise filtering
+            content_type_keywords = {
+                "blogs": [
+                    # Blog/Article Content
+                    "blog", "article", "post", "analysis", "insight", "opinion", "editorial", "commentary",
+                    "review", "report", "news", "update", "announcement", "release notes", "press release",
+                    "whitepaper", "case study", "research paper", "technical paper", "study", "findings",
+                    "medium.com", "substack", "towards data science", "arxiv", "research", "publication"
+                ],
+                "podcasts": [
+                    # Audio Content
+                    "podcast", "audio", "interview", "conversation", "discussion", "talk", "speech",
+                    "listening", "episode", "show", "radio", "voice", "spoken", "hear", "listen",
+                    "spotify", "apple podcasts", "google podcasts", "soundcloud", "anchor",
+                    "ai podcast", "tech talks", "machine learning podcast", "data science podcast"
+                ],
+                "videos": [
+                    # Video Content
+                    "video", "youtube", "tutorial", "presentation", "webinar", "demo", "demonstration",
+                    "course", "lecture", "talk", "keynote", "conference talk", "workshop video",
+                    "screencast", "walkthrough", "how-to", "explainer", "visualization", "animation",
+                    "vimeo", "twitch", "livestream", "stream", "recorded", "watch", "viewing"
+                ],
+                "events": [
+                    # Event Content
+                    "conference", "event", "summit", "meetup", "workshop", "symposium", "convention",
+                    "gathering", "networking", "hackathon", "competition", "contest", "expo", "fair",
+                    "seminar", "session", "panel", "roundtable", "forum", "discussion group",
+                    "neurips", "icml", "iclr", "cvpr", "aaai", "tech conference", "ai summit"
+                ],
+                "learn": [
+                    # Educational Content
+                    "course", "tutorial", "guide", "learn", "education", "training", "lesson", "class",
+                    "certification", "curriculum", "syllabus", "module", "chapter", "textbook",
+                    "handbook", "manual", "documentation", "wiki", "faq", "how-to", "step-by-step",
+                    "coursera", "udemy", "edx", "khan academy", "mit opencourseware", "stanford online"
+                ]
+            }
+            
+            # Content type matching and scoring
+            content_type_score = 0
+            matched_content_types = []
+            
+            for content_type in user_content_types:
+                if content_type in content_type_keywords:
+                    type_keywords = content_type_keywords[content_type]
+                    type_matches = sum(1 for keyword in type_keywords if keyword in content_text)
+                    if type_matches > 0:
+                        content_type_score += type_matches * 1.5  # Weight for content type matches
+                        matched_content_types.append(content_type)
+            
+            # Content type filtering logic
+            if user_content_types and not matched_content_types:
+                # If user has content type preferences but article doesn't match any,
+                # be more flexible when they have no topic preferences (general browsing)
+                if not user_topics:
+                    # For users with no topic preferences, be less strict about content types
+                    # Give articles a chance if they have general AI content
+                    if preference_score == 0:  # No general AI keywords found either
+                        continue  # Skip only if no AI relevance at all
+                else:
+                    # For users with topic preferences, be strict about content types
+                    continue  # Skip articles that don't match any user content type preferences
+            
+            # Add base significance score
+            significance_score = article.get("significance_score", 0)
+            total_score = preference_score + content_type_score + (significance_score * 0.1)
+            
+            article_copy = article.copy()
+            article_copy["preference_score"] = preference_score
+            article_copy["content_type_score"] = content_type_score
+            article_copy["matched_content_types"] = matched_content_types
+            article_copy["total_score"] = total_score
+            
+            scored_articles.append(article_copy)
+        
+        # Sort by total score (preference + significance)
+        scored_articles.sort(key=lambda x: x.get("total_score", 0), reverse=True)
+        
+        # Remove scoring fields before returning (keep only original article data)
+        for article in scored_articles:
+            article.pop("preference_score", None)
+            article.pop("content_type_score", None)
+            article.pop("matched_content_types", None)
+            article.pop("total_score", None)
+        
+        logger.info(f"🎯 Preference filtering result: {len(scored_articles)}/{len(articles)} articles matched user preferences")
+        if len(scored_articles) > 0:
+            logger.info(f"📰 Top filtered article: {scored_articles[0].get('title', 'Unknown')[:60]}")
+        
+        return scored_articles
     
     async def handle_personalized_digest(self, headers: Dict, params: Dict = None) -> Dict[str, Any]:
         """Get personalized digest - requires authentication"""
@@ -1294,7 +1909,7 @@ class AINewsRouter:
             logger.info(f"📊 User existence check: existing={is_existing_user}")
             
             # Insert or update user (table schema already initialized)
-            existing_columns = ['id', 'email', 'name', 'picture', 'verified_email', 'subscription_tier', 'created_at', 'updated_at']
+            existing_columns = ['id', 'email', 'name', 'profile_image', 'subscription_tier', 'preferences', 'created_at', 'last_login_at', 'is_active']
             
             # Build INSERT statement based on available columns
             available_data_columns = []
@@ -1312,18 +1927,71 @@ class AINewsRouter:
                 values.append(token_data.get('name', ''))
             
             # Add optional columns if they exist
-            if 'picture' in existing_columns:
-                available_data_columns.append('picture')
+            if 'profile_image' in existing_columns:
+                available_data_columns.append('profile_image')
                 values.append(token_data.get('picture', ''))
-            if 'verified_email' in existing_columns:
-                available_data_columns.append('verified_email')
+            if 'subscription_tier' in existing_columns:
+                available_data_columns.append('subscription_tier')
+                values.append('free')
+            if 'is_active' in existing_columns:
+                available_data_columns.append('is_active')
                 values.append(True)
-            if 'updated_at' in existing_columns:
-                available_data_columns.append('updated_at')
+            if 'last_login_at' in existing_columns:
+                available_data_columns.append('last_login_at')
                 values.append(datetime.utcnow().isoformat())
             if 'created_at' in existing_columns:
                 available_data_columns.append('created_at')
                 values.append(datetime.utcnow().isoformat())
+            
+            # Set up preferences for new or existing user
+            if is_existing_user and existing_user:
+                # Load existing preferences
+                existing_prefs_json = existing_user[5] if len(existing_user) > 5 else None  # preferences column
+                if existing_prefs_json:
+                    preferences = json.loads(existing_prefs_json)
+                    # Ensure mandatory topics are included for existing users
+                    existing_topics = preferences.get('topics', [])
+                    mandatory_topics = self.get_mandatory_topics()
+                    
+                    # Check if mandatory topics are missing
+                    mandatory_ids = {t['id'] for t in mandatory_topics}
+                    existing_ids = set()
+                    
+                    if isinstance(existing_topics, list):
+                        for topic in existing_topics:
+                            if isinstance(topic, dict):
+                                existing_ids.add(topic.get('id', ''))
+                    
+                    # Add missing mandatory topics
+                    for mandatory_topic in mandatory_topics:
+                        if mandatory_topic['id'] not in existing_ids:
+                            existing_topics.append(mandatory_topic)
+                    
+                    preferences['topics'] = existing_topics
+                    preferences['content_types'] = ['blogs', 'podcasts', 'videos']  # Ensure proper content types
+                else:
+                    # Existing user but no preferences - create with mandatory topics
+                    preferences = {
+                        "topics": self.get_mandatory_topics(),
+                        "newsletter_frequency": "weekly",
+                        "email_notifications": True,
+                        "content_types": ["blogs", "podcasts", "videos"],
+                        "onboarding_completed": True
+                    }
+            else:
+                # New user - create with mandatory topics
+                preferences = {
+                    "topics": self.get_mandatory_topics(),
+                    "newsletter_frequency": "weekly",
+                    "email_notifications": True,
+                    "content_types": ["blogs", "podcasts", "videos"],
+                    "onboarding_completed": True
+                }
+            
+            # Add preferences to the insert/update
+            if 'preferences' in existing_columns:
+                available_data_columns.append('preferences')
+                values.append(json.dumps(preferences))
             
             # Build and execute dynamic INSERT statement
             columns_str = ', '.join(available_data_columns)
@@ -1335,49 +2003,7 @@ class AINewsRouter:
             """, values)
             
             logger.info(f"✅ User inserted with available columns: {available_data_columns}")
-            
-            # Check user preferences and onboarding status (table already initialized)
-            
-            try:
-                cursor.execute("SELECT * FROM user_preferences WHERE user_id = ?", (user_id,))
-                user_prefs = cursor.fetchone()
-            except:
-                user_prefs = None
-            
-            # Set preferences based on whether user exists in database
-            if user_prefs:
-                # Existing user - preserve their onboarding status and preferences
-                preferences = {
-                    "topics": json.loads(user_prefs['topics']) if user_prefs['topics'] else [],
-                    "newsletter_frequency": user_prefs['newsletter_frequency'],
-                    "email_notifications": bool(user_prefs['email_notifications']),
-                    "content_types": json.loads(user_prefs['content_types']) if user_prefs['content_types'] else ["blogs", "podcasts", "videos"],
-                    "onboarding_completed": bool(user_prefs['onboarding_completed'])
-                }
-            else:
-                # New user - needs to complete onboarding
-                preferences = {
-                    "topics": [],
-                    "newsletter_frequency": "weekly", 
-                    "email_notifications": True,
-                    "content_types": ["blogs", "podcasts", "videos"],
-                    "onboarding_completed": False  # New users need onboarding
-                }
-            
-            logger.info(f"📊 User preferences loaded: onboarding_completed={preferences['onboarding_completed']}")
-            
-            # Create default preferences for new Google users
-            if not user_prefs:
-                logger.info("📝 Creating default preferences for new Google user")
-                cursor.execute("""
-                    INSERT OR REPLACE INTO user_preferences (
-                        user_id, topics, content_types, newsletter_frequency, 
-                        email_notifications, onboarding_completed
-                    ) VALUES (?, ?, ?, ?, ?, ?)
-                """, (
-                    user_id, '[]', '["blogs", "podcasts", "videos"]', 'weekly', True, False
-                ))
-                logger.info("✅ Default preferences created for new Google user (onboarding required)")
+            logger.info(f"📊 User preferences set: onboarding_completed={preferences['onboarding_completed']}, topics_count={len(preferences['topics'])}")
             
             conn.commit()
             conn.close()
