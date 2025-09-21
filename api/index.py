@@ -799,22 +799,39 @@ class AINewsRouter:
                 content_type = article["type"]
                 if content_type in content_by_type:
                     content_by_type[content_type].append(article)
-                
-                # Add to top stories if high significance (lowered threshold for debugging)
-                if article["significanceScore"] > 5.0 and len(top_stories) < 5:
-                    top_stories.append({
-                        "title": article["title"],
-                        "source": article["source"],
-                        "significanceScore": article["significanceScore"],
-                        "url": article["url"],
-                        "imageUrl": article.get("imageUrl"),
-                        "summary": article["content_summary"]
-                    })
             
-            # Fallback: if no top stories found, use the highest rated articles
-            if len(top_stories) == 0 and len(articles) > 0:
-                logger.info("📰 No articles above significance threshold, using fallback top stories")
-                for article in articles[:3]:  # Take top 3 by significance
+            # Generate top stories with personalization for authenticated users
+            if is_personalized and user_preferences and not is_preview_mode:
+                # For authenticated users, apply preference filtering to top stories as well
+                logger.info("🎯 Generating personalized top stories based on user preferences")
+                
+                # Convert articles to format for preference filtering
+                articles_for_top_stories = []
+                for article in articles:
+                    articles_for_top_stories.append({
+                        "title": article["title"],
+                        "summary": article["content_summary"],
+                        "source": article["source"],
+                        "url": article["url"],
+                        "significance_score": article["significanceScore"]
+                    })
+                
+                # Apply user preference filtering to find personalized top stories
+                personalized_articles = self.filter_articles_by_user_preferences(
+                    articles_for_top_stories, user_preferences
+                )
+                
+                # Create top stories from personalized articles (higher threshold for quality)
+                personalized_urls = set(article.get("url", "") for article in personalized_articles)
+                personalized_top_candidates = [
+                    article for article in articles 
+                    if article.get("url", "") in personalized_urls and article["significanceScore"] > 5.0
+                ]
+                
+                # Sort by significance score and take top 5
+                personalized_top_candidates.sort(key=lambda x: x["significanceScore"], reverse=True)
+                
+                for article in personalized_top_candidates[:5]:
                     top_stories.append({
                         "title": article["title"],
                         "source": article["source"],
@@ -823,6 +840,55 @@ class AINewsRouter:
                         "imageUrl": article.get("imageUrl"),
                         "summary": article["content_summary"]
                     })
+                
+                logger.info(f"🎯 Personalized top stories generated: {len(top_stories)} stories from {len(personalized_top_candidates)} candidates")
+                
+                # Fallback: if no personalized top stories found, use highest rated personalized articles
+                if len(top_stories) == 0 and len(personalized_articles) > 0:
+                    logger.info("🎯 No personalized articles above significance threshold, using fallback personalized top stories")
+                    fallback_candidates = [
+                        article for article in articles 
+                        if article.get("url", "") in personalized_urls
+                    ]
+                    fallback_candidates.sort(key=lambda x: x["significanceScore"], reverse=True)
+                    
+                    for article in fallback_candidates[:3]:
+                        top_stories.append({
+                            "title": article["title"],
+                            "source": article["source"],
+                            "significanceScore": article["significanceScore"],
+                            "url": article["url"],
+                            "imageUrl": article.get("imageUrl"),
+                            "summary": article["content_summary"]
+                        })
+            else:
+                # For non-authenticated users or preview mode, use general top stories
+                logger.info("📰 Generating general top stories (no personalization)")
+                
+                for article in articles:
+                    # Add to top stories if high significance (lowered threshold for debugging)
+                    if article["significanceScore"] > 5.0 and len(top_stories) < 5:
+                        top_stories.append({
+                            "title": article["title"],
+                            "source": article["source"],
+                            "significanceScore": article["significanceScore"],
+                            "url": article["url"],
+                            "imageUrl": article.get("imageUrl"),
+                            "summary": article["content_summary"]
+                        })
+                
+                # Fallback: if no top stories found, use the highest rated articles
+                if len(top_stories) == 0 and len(articles) > 0:
+                    logger.info("📰 No articles above significance threshold, using fallback top stories")
+                    for article in articles[:3]:  # Take top 3 by significance
+                        top_stories.append({
+                            "title": article["title"],
+                            "source": article["source"],
+                            "significanceScore": article["significanceScore"],
+                            "url": article["url"],
+                            "imageUrl": article.get("imageUrl"),
+                            "summary": article["content_summary"]
+                        })
             
             # Calculate metrics
             total_articles = len(articles)
