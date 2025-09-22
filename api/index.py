@@ -1147,6 +1147,9 @@ class AINewsRouter:
             elif endpoint == "init-sources":
                 logger.info("🚀 Routing to public sources initialization handler")
                 return await self.handle_public_init_sources()
+            elif endpoint == "init-topics":
+                logger.info("🔗 Routing to public article-topic mapping handler")
+                return await self.handle_public_init_topics()
             elif endpoint == "test-neon":
                 logger.info("🧪 Routing to test-neon handler")
                 return await self.handle_test_neon()
@@ -4769,6 +4772,48 @@ Vidyagam • Connecting AI Innovation
                 "debug_info": {"traceback": traceback.format_exc()}
             }
 
+    async def handle_public_init_topics(self) -> Dict[str, Any]:
+        """Public endpoint to initialize article-topic mappings"""
+        try:
+            logger.info("🔗 Public article-topic mapping initialization requested")
+            
+            # Trigger the auto-population
+            self.auto_populate_article_topic_mappings()
+            
+            # Check mapping status
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT COUNT(*) FROM article_topics")
+            mapping_count = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM articles")
+            article_count = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM ai_topics")
+            topic_count = cursor.fetchone()[0]
+            
+            conn.close()
+            
+            return {
+                "success": True,
+                "message": "Article-topic mapping initialization completed",
+                "mappings_created": mapping_count,
+                "total_articles": article_count,
+                "total_topics": topic_count,
+                "timestamp": datetime.utcnow().isoformat(),
+                "router_handled": True
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Public article-topic mapping failed: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "timestamp": datetime.utcnow().isoformat(),
+                "router_handled": True
+            }
+    
     async def handle_public_init_sources(self) -> Dict[str, Any]:
         """Public endpoint to initialize comprehensive AI sources (no auth required)"""
         try:
