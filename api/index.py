@@ -5100,6 +5100,7 @@ Vidyagam • Connecting AI Innovation
             
             total_added = 0
             total_skipped = 0
+            debug_info = []
             
             for topic_id, sources in comprehensive_topic_sources.items():
                 logger.info(f"📊 Processing sources for topic: {topic_id}")
@@ -5159,6 +5160,11 @@ Vidyagam • Connecting AI Innovation
                             cursor.execute("SELECT topic_id, display_name FROM ai_topics LIMIT 10")
                             available_topics = cursor.fetchall()
                             logger.info(f"📋 Available topics: {available_topics}")
+                            debug_info.append({
+                                'topic_searched': topic_id,
+                                'topic_found': False,
+                                'available_topics': available_topics
+                            })
                         
                         logger.info(f"✅ Added: {source['title']}")
                         total_added += 1
@@ -5189,6 +5195,7 @@ Vidyagam • Connecting AI Innovation
                 "total_articles": total_articles,
                 "total_mappings": total_mappings,
                 "topics_covered": len(comprehensive_topic_sources),
+                "debug_info": debug_info,
                 "timestamp": datetime.utcnow().isoformat(),
                 "router_handled": True
             }
