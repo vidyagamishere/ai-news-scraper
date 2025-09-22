@@ -1150,6 +1150,9 @@ class AINewsRouter:
             elif endpoint == "init-topics":
                 logger.info("🔗 Routing to public article-topic mapping handler")
                 return await self.handle_public_init_topics()
+            elif endpoint == "add-research-articles":
+                logger.info("📚 Routing to public research articles handler")
+                return await self.handle_public_add_research_articles()
             elif endpoint == "test-neon":
                 logger.info("🧪 Routing to test-neon handler")
                 return await self.handle_test_neon()
@@ -4886,6 +4889,305 @@ Vidyagam • Connecting AI Innovation
             return {
                 "success": False,
                 "error": f"Sources initialization failed: {str(e)}",
+                "status": 500,
+                "debug_info": {"traceback": traceback.format_exc()}
+            }
+
+    async def handle_public_add_research_articles(self) -> Dict[str, Any]:
+        """Public endpoint to add comprehensive research articles for AI topics"""
+        try:
+            logger.info("📚 Public research articles addition requested")
+            
+            # Comprehensive AI topic sources based on research
+            comprehensive_topic_sources = {
+                # Machine Learning Foundations
+                'ml_foundations': [
+                    {
+                        'title': 'Google DeepMind Research Publications',
+                        'url': 'https://deepmind.google/research/publications/',
+                        'content': 'Comprehensive collection of machine learning research papers from Google DeepMind covering breakthrough algorithms, model architectures, and theoretical foundations.',
+                        'summary': 'Latest ML research from DeepMind including Gemini models, AlphaFold, and advanced neural network architectures with detailed technical papers.',
+                        'source': 'Google DeepMind',
+                        'content_type': 'articles',
+                        'significance_score': 9.8
+                    },
+                    {
+                        'title': 'OpenAI Research Blog',
+                        'url': 'https://openai.com/research/',
+                        'content': 'Cutting-edge machine learning research including GPT model developments, reinforcement learning, and AI safety research.',
+                        'summary': 'OpenAI research covering large language models, DALL-E, safety alignment, and foundational ML techniques.',
+                        'source': 'OpenAI',
+                        'content_type': 'articles',
+                        'significance_score': 9.7
+                    },
+                    {
+                        'title': 'Stanford AI Index 2024 Report',
+                        'url': 'https://hai.stanford.edu/ai-index/2024-ai-index-report',
+                        'content': 'Comprehensive annual report analyzing AI progress, including training costs, model capabilities, and industry trends.',
+                        'summary': 'Detailed analysis of 2024 AI developments including 191M USD Gemini Ultra training costs and responsible AI reporting standards.',
+                        'source': 'Stanford HAI',
+                        'content_type': 'articles',
+                        'significance_score': 9.5
+                    }
+                ],
+                
+                # Computer Vision
+                'computer_vision': [
+                    {
+                        'title': 'CVPR 2024 Open Access Repository',
+                        'url': 'https://openaccess.thecvf.com/CVPR2024',
+                        'content': 'Complete collection of Computer Vision and Pattern Recognition 2024 conference papers with 23.6% acceptance rate.',
+                        'summary': 'Premier computer vision research from CVPR 2024 covering image recognition, deep learning, and visual AI advances.',
+                        'source': 'Computer Vision Foundation',
+                        'content_type': 'articles',
+                        'significance_score': 9.6
+                    },
+                    {
+                        'title': 'arXiv Computer Vision Papers',
+                        'url': 'https://arxiv.org/list/cs.CV/recent',
+                        'content': 'Latest computer vision research papers including work accepted to ICCV 2025, IEEE T-PAMI, and other major venues.',
+                        'summary': 'Real-time access to cutting-edge computer vision research covering object detection, image generation, and visual understanding.',
+                        'source': 'arXiv',
+                        'content_type': 'articles',
+                        'significance_score': 9.2
+                    },
+                    {
+                        'title': 'OpenCV Computer Vision Research Guide 2025',
+                        'url': 'https://opencv.org/blog/computer-vision-research/',
+                        'content': 'Comprehensive guide to computer vision research methodologies and current trends for 2025.',
+                        'summary': 'Practical guidance for CV researchers covering publication strategies, research directions, and emerging applications.',
+                        'source': 'OpenCV',
+                        'content_type': 'articles',
+                        'significance_score': 8.8
+                    }
+                ],
+                
+                # Natural Language Processing
+                'nlp_llm': [
+                    {
+                        'title': 'EMNLP 2024 Conference Proceedings',
+                        'url': 'https://aclanthology.org/events/emnlp-2024/',
+                        'content': 'Over 1,300 research papers from the premier empirical methods in NLP conference covering LLMs, alignment, and language understanding.',
+                        'summary': 'Latest NLP research including RLHF alignment, embedding models with 32K context windows, and advanced language processing.',
+                        'source': 'ACL Anthology',
+                        'content_type': 'articles',
+                        'significance_score': 9.4
+                    },
+                    {
+                        'title': 'Stanford NLP Group Publications',
+                        'url': 'https://nlp.stanford.edu/pubs/',
+                        'content': 'Research publications from Stanford NLP covering transformer architectures, language models, and computational linguistics.',
+                        'summary': 'Academic research from leading NLP institution covering model architectures, training techniques, and language applications.',
+                        'source': 'Stanford NLP',
+                        'content_type': 'articles',
+                        'significance_score': 9.3
+                    },
+                    {
+                        'title': 'Best NLP Papers 2025',
+                        'url': 'https://thebestnlppapers.com/',
+                        'content': 'Curated collection of top NLP research papers ranked by citation count and research impact.',
+                        'summary': 'Peer-reviewed selection of most influential NLP papers covering LLMs, transformers, and language understanding advances.',
+                        'source': 'NLP Research Community',
+                        'content_type': 'articles',
+                        'significance_score': 9.1
+                    }
+                ],
+                
+                # Robotics & Automation
+                'robotics': [
+                    {
+                        'title': 'IEEE ICRA 2025 Conference',
+                        'url': 'https://2025.ieee-icra.org/',
+                        'content': 'Premier robotics and automation conference featuring latest research in autonomous systems, manipulation, and AI integration.',
+                        'summary': 'Global robotics research including Boston Dynamics collaborations, mobile manipulation, and autonomous navigation systems.',
+                        'source': 'IEEE Robotics Society',
+                        'content_type': 'articles',
+                        'significance_score': 9.5
+                    },
+                    {
+                        'title': 'IEEE Robotics and Automation Letters',
+                        'url': 'https://www.ieee-ras.org/publications/ra-l',
+                        'content': 'Peer-reviewed journal publishing rapid-turnaround robotics research with presentation opportunities at major conferences.',
+                        'summary': 'Latest robotics research covering theoretical foundations, experimental studies, and real-world deployment case studies.',
+                        'source': 'IEEE RAS',
+                        'content_type': 'articles',
+                        'significance_score': 9.2
+                    },
+                    {
+                        'title': 'IEEE Transactions on Robotics',
+                        'url': 'https://www.ieee-ras.org/publications/t-ro',
+                        'content': 'Leading robotics publication featuring major advances in robot design, algorithms, and integration systems.',
+                        'summary': 'Comprehensive robotics research covering theory, experimental validation, and practical robotics applications.',
+                        'source': 'IEEE',
+                        'content_type': 'articles',
+                        'significance_score': 9.0
+                    }
+                ],
+                
+                # Quantum Computing & AI
+                'quantum_ai': [
+                    {
+                        'title': 'Google Quantum AI Research',
+                        'url': 'https://quantumai.google/research',
+                        'content': 'Leading quantum computing research including Sycamore processor developments and quantum-classical hybrid algorithms.',
+                        'summary': 'Quantum supremacy research, DARPA collaboration, and TensorFlow Quantum for machine learning integration.',
+                        'source': 'Google Quantum AI',
+                        'content_type': 'articles',
+                        'significance_score': 9.6
+                    },
+                    {
+                        'title': 'IBM Quantum Research Papers',
+                        'url': 'https://research.ibm.com/topics/quantum-computing',
+                        'content': 'Quantum computing research including 133-qubit systems, quantum kernels, and fault-tolerant computing advances.',
+                        'summary': 'IBM quantum processor research, quantum-classical algorithms, and practical quantum machine learning applications.',
+                        'source': 'IBM Research',
+                        'content_type': 'articles',
+                        'significance_score': 9.4
+                    },
+                    {
+                        'title': 'Quantum Computing and AI Status Paper 2025',
+                        'url': 'https://arxiv.org/abs/2505.23860',
+                        'content': 'Comprehensive white paper analyzing intersection of quantum computing and artificial intelligence with research agenda.',
+                        'summary': 'Academic analysis of quantum AI applications, challenges, and long-term research directions for hybrid systems.',
+                        'source': 'arXiv',
+                        'content_type': 'articles',
+                        'significance_score': 9.1
+                    }
+                ],
+                
+                # AI Ethics & Governance
+                'ai_ethics': [
+                    {
+                        'title': 'EU AI Act Implementation 2024',
+                        'url': 'https://digital-strategy.ec.europa.eu/en/policies/regulatory-framework-ai',
+                        'content': 'Comprehensive legal framework for AI governance including compliance requirements and ethical guidelines.',
+                        'summary': 'World first comprehensive AI regulation covering risk assessment, transparency, and accountability requirements.',
+                        'source': 'European Union',
+                        'content_type': 'articles',
+                        'significance_score': 9.7
+                    },
+                    {
+                        'title': 'Responsible AI Frameworks 2024 Analysis',
+                        'url': 'https://medium.com/@adnanmasood/responsible-ai-revisited-critical-changes-and-updates-since-our-2023-playbook-0c1610d57f37',
+                        'content': 'Critical analysis of responsible AI developments and framework updates addressing stakeholder influence and practical implementation.',
+                        'summary': 'Updated responsible AI guidelines covering fairness, accountability, and organizational adoption strategies.',
+                        'source': 'Medium Research',
+                        'content_type': 'articles',
+                        'significance_score': 8.9
+                    },
+                    {
+                        'title': 'OECD AI Accountability Framework 2025',
+                        'url': 'https://www.oecd.org/en/topics/policy-issues/artificial-intelligence.html',
+                        'content': 'International AI governance framework focusing on accountability, transparency, and cross-border cooperation.',
+                        'summary': 'Global AI policy recommendations covering responsible development, deployment, and governance structures.',
+                        'source': 'OECD',
+                        'content_type': 'articles',
+                        'significance_score': 9.3
+                    }
+                ]
+            }
+            
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+            
+            # Get content type IDs
+            cursor.execute("SELECT id FROM content_types WHERE name = 'articles'")
+            articles_content_type_id = cursor.fetchone()
+            if articles_content_type_id:
+                articles_content_type_id = articles_content_type_id[0]
+            else:
+                articles_content_type_id = 1  # Default to 1
+            
+            total_added = 0
+            total_skipped = 0
+            
+            for topic_id, sources in comprehensive_topic_sources.items():
+                logger.info(f"📊 Processing sources for topic: {topic_id}")
+                
+                for source in sources:
+                    try:
+                        # Check if URL already exists
+                        cursor.execute("SELECT id FROM articles WHERE url = ?", (source['url'],))
+                        existing = cursor.fetchone()
+                        
+                        if existing:
+                            logger.info(f"⚠️ Skipping duplicate URL: {source['url']}")
+                            total_skipped += 1
+                            continue
+                        
+                        # Insert article
+                        current_time = datetime.utcnow().isoformat()
+                        cursor.execute("""
+                            INSERT INTO articles 
+                            (title, content, summary, url, source, published_date, 
+                             significance_score, content_type_id, read_time, 
+                             processing_status, created_at, updated_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'processed', ?, ?)
+                        """, (
+                            source['title'],
+                            source['content'],
+                            source['summary'],
+                            source['url'],
+                            source['source'],
+                            current_time,
+                            source['significance_score'],
+                            articles_content_type_id,
+                            '8 min',
+                            current_time,
+                            current_time
+                        ))
+                        
+                        article_id = cursor.lastrowid
+                        
+                        # Map to topic if possible
+                        cursor.execute("SELECT id FROM ai_topics WHERE id = ?", (topic_id,))
+                        topic_exists = cursor.fetchone()
+                        
+                        if topic_exists:
+                            cursor.execute("""
+                                INSERT OR IGNORE INTO article_topics (article_id, topic_id, relevance_score)
+                                VALUES (?, ?, ?)
+                            """, (article_id, topic_id, source['significance_score'] / 10.0))
+                        
+                        logger.info(f"✅ Added: {source['title']}")
+                        total_added += 1
+                        
+                    except Exception as e:
+                        logger.error(f"❌ Failed to add article {source['title']}: {str(e)}")
+                        continue
+            
+            # Commit all changes
+            conn.commit()
+            
+            # Get final counts
+            cursor.execute("SELECT COUNT(*) FROM articles")
+            total_articles = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM article_topics")
+            total_mappings = cursor.fetchone()[0]
+            
+            conn.close()
+            
+            logger.info(f"✅ Research articles addition completed: {total_added} added, {total_skipped} skipped")
+            
+            return {
+                "success": True,
+                "message": "Research articles added successfully",
+                "articles_added": total_added,
+                "articles_skipped": total_skipped,
+                "total_articles": total_articles,
+                "total_mappings": total_mappings,
+                "topics_covered": len(comprehensive_topic_sources),
+                "timestamp": datetime.utcnow().isoformat(),
+                "router_handled": True
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Research articles addition failed: {str(e)}")
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            return {
+                "success": False,
+                "error": f"Research articles addition failed: {str(e)}",
                 "status": 500,
                 "debug_info": {"traceback": traceback.format_exc()}
             }
