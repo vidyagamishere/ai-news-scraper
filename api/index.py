@@ -25,7 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-print("🚂 AI News Scraper API Router - Railway Deployment with Persistent Storage")
+print("🚂 AI News Scraper API Router - Railway Deployment with Persistent Storage (Updated)")
 print(f"📍 Startup Time: {datetime.utcnow().isoformat()}")
 print(f"🗄️ Railway Persistent Storage: Enabled")
 
