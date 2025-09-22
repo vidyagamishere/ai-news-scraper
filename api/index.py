@@ -464,6 +464,18 @@ class AINewsRouter:
                 logger.info("✅ Added read_time column to articles table")
             except:
                 logger.info("ℹ️ read_time column already exists in articles table")
+                
+            try:
+                cursor.execute("ALTER TABLE articles ADD COLUMN processing_status TEXT DEFAULT 'pending'")
+                logger.info("✅ Added processing_status column to articles table")
+            except:
+                logger.info("ℹ️ processing_status column already exists in articles table")
+                
+            try:
+                cursor.execute("ALTER TABLE articles ADD COLUMN content_hash TEXT")
+                logger.info("✅ Added content_hash column to articles table")
+            except:
+                logger.info("ℹ️ content_hash column already exists in articles table")
             
             # Migration: Add missing columns to users table
             required_user_columns = [
