@@ -1563,7 +1563,9 @@ class AINewsRouter:
                         "significanceScore": article["significanceScore"],
                         "url": article["url"],
                         "imageUrl": article.get("imageUrl"),
-                        "summary": article["content_summary"]
+                        "summary": article["content_summary"],
+                        "topics": article.get("topics", []),  # Include topic data from view
+                        "from_view": article.get("from_view", False)  # Include view flag
                     })
                 
                 logger.info(f"🎯 Personalized top stories generated: {len(top_stories)} stories from {len(personalized_top_candidates)} candidates")
@@ -1584,7 +1586,9 @@ class AINewsRouter:
                             "significanceScore": article["significanceScore"],
                             "url": article["url"],
                             "imageUrl": article.get("imageUrl"),
-                            "summary": article["content_summary"]
+                            "summary": article["content_summary"],
+                            "topics": article.get("topics", []),  # Include topic data from view
+                            "from_view": article.get("from_view", False)  # Include view flag
                         })
             else:
                 # For non-authenticated users or preview mode, use general top stories
@@ -1599,7 +1603,9 @@ class AINewsRouter:
                             "significanceScore": article["significanceScore"],
                             "url": article["url"],
                             "imageUrl": article.get("imageUrl"),
-                            "summary": article["content_summary"]
+                            "summary": article["content_summary"],
+                            "topics": article.get("topics", []),  # Include topic data from view
+                            "from_view": article.get("from_view", False)  # Include view flag
                         })
                 
                 # Fallback: if no top stories found, use the highest rated articles
@@ -1612,7 +1618,9 @@ class AINewsRouter:
                             "significanceScore": article["significanceScore"],
                             "url": article["url"],
                             "imageUrl": article.get("imageUrl"),
-                            "summary": article["content_summary"]
+                            "summary": article["content_summary"],
+                            "topics": article.get("topics", []),  # Include topic data from view
+                            "from_view": article.get("from_view", False)  # Include view flag
                         })
             
             # Calculate metrics
