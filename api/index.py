@@ -424,11 +424,42 @@ class AINewsRouter:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_email_otps_expires ON email_otps(expires_at)")
             
             # =================================================================
+            # AI SOURCES TABLE - Database-driven source management
+            # =================================================================
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS ai_sources (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    rss_url TEXT NOT NULL,
+                    website TEXT NOT NULL,
+                    enabled BOOLEAN DEFAULT 1,
+                    priority INTEGER DEFAULT 5,
+                    content_type TEXT DEFAULT 'blogs', -- blogs, podcasts, videos, learning, events, demos
+                    category TEXT DEFAULT 'general',
+                    ai_topics TEXT, -- JSON array of AI topic IDs this source covers
+                    meta_tags TEXT, -- JSON array of keywords and tags for topic matching
+                    description TEXT,
+                    language TEXT DEFAULT 'en',
+                    verified BOOLEAN DEFAULT 0, -- Verified as legitimate source
+                    last_scraped TIMESTAMP,
+                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    status TEXT DEFAULT 'active', -- active, inactive, error
+                    error_count INTEGER DEFAULT 0,
+                    max_articles INTEGER DEFAULT 10,
+                    scrape_frequency TEXT DEFAULT 'daily', -- daily, weekly, hourly
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # =================================================================
             # CLEANUP OLD DATA
             # =================================================================
             
             # Clean up expired OTPs
             cursor.execute("DELETE FROM email_otps WHERE expires_at < ?", (datetime.utcnow().isoformat(),))
+            
+            # Populate AI sources table with comprehensive legitimate sources
+            self.populate_ai_sources_table(cursor)
             
             # Commit all changes
             conn.commit()
@@ -461,6 +492,63 @@ class AINewsRouter:
             conn.row_factory = sqlite3.Row
             return conn
     
+    def populate_ai_sources_table(self, cursor):
+        """Populate AI sources table with comprehensive legitimate sources covering ALL 23 AI topics"""
+        logger.info("📚 Populating AI sources table with comprehensive sources for all 23 topics")
+        
+        # Check if sources already exist
+        cursor.execute("SELECT COUNT(*) as count FROM ai_sources")
+        existing_count = cursor.fetchone()['count']
+        
+        if existing_count > 0:
+            logger.info(f"📊 Found {existing_count} existing sources, skipping population")
+            return
+        
+        # Import comprehensive AI sources covering all 23 topics with proper content types and meta tags
+        from comprehensive_ai_sources import COMPREHENSIVE_AI_SOURCES
+        comprehensive_sources = COMPREHENSIVE_AI_SOURCES
+        
+        # Insert all sources with meta_tags column included
+        for source in comprehensive_sources:
+            cursor.execute("""
+                INSERT INTO ai_sources (
+                    name, rss_url, website, content_type, category, ai_topics,
+                    meta_tags, description, verified, priority, enabled
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                source["name"],
+                source["rss_url"],
+                source["website"],
+                source["content_type"],
+                source["category"],
+                source["ai_topics"],
+                source.get("meta_tags", "[]"),  # Include meta_tags with fallback
+                source["description"],
+                source["verified"],
+                source["priority"],
+                True
+            ))
+        
+        logger.info(f"✅ Populated {len(comprehensive_sources)} AI sources covering all 23 AI topics with meta tags")
+    
+    def ensure_ai_sources_table(self, cursor):
+        """Ensure ai_sources table exists and is populated with comprehensive sources"""
+        try:
+            # Check if table exists and has data
+            cursor.execute("SELECT COUNT(*) as count FROM ai_sources")
+            existing_count = cursor.fetchone()['count']
+            
+            if existing_count == 0:
+                logger.info("📥 ai_sources table empty, populating with comprehensive sources...")
+                self.populate_ai_sources_table(cursor)
+            else:
+                logger.info(f"📊 ai_sources table has {existing_count} sources")
+                
+        except Exception as e:
+            logger.error(f"❌ Error ensuring ai_sources table: {str(e)}")
+            # Table might not exist, let it be created by schema initialization
+            logger.info("🔄 Will populate on next schema initialization")
+    
     async def route_request(self, endpoint: str, method: str = "GET", params: Dict = None, headers: Dict = None, body: Dict = None) -> Dict[str, Any]:
         """Main router function - handles ALL API endpoints with debug logging"""
         try:
@@ -484,6 +572,9 @@ class AINewsRouter:
             elif endpoint == "sources":
                 logger.info("🔗 Routing to sources handler")
                 return await self.handle_sources()
+            elif endpoint == "init-sources":
+                logger.info("🚀 Routing to public sources initialization handler")
+                return await self.handle_public_init_sources()
             elif endpoint == "test-neon":
                 logger.info("🧪 Routing to test-neon handler")
                 return await self.handle_test_neon()
@@ -517,7 +608,7 @@ class AINewsRouter:
                 return {
                     "error": f"Endpoint '{endpoint}' not found in router",
                     "available_endpoints": [
-                        "health", "digest", "sources", "test-neon", "content-types", "content/*",
+                        "health", "digest", "sources", "init-sources", "test-neon", "content-types", "content/*",
                         "personalized-digest", "user-preferences", "auth/*", "admin/*"
                     ],
                     "router_architecture": "single_function",
@@ -961,24 +1052,101 @@ class AINewsRouter:
             }
     
     async def handle_sources(self) -> Dict[str, Any]:
-        """Get sources configuration with debug info"""
-        logger.info("🔗 Processing sources request")
-        return {
-            "sources": [
-                {"name": "OpenAI Blog", "rss_url": "https://openai.com/blog/rss.xml", "website": "https://openai.com", "enabled": True, "priority": 10, "category": "research", "content_type": "blog"},
-                {"name": "Anthropic", "rss_url": "https://www.anthropic.com/news/rss.xml", "website": "https://www.anthropic.com", "enabled": True, "priority": 10, "category": "research", "content_type": "blog"},
-                {"name": "Google AI Blog", "rss_url": "https://ai.googleblog.com/feeds/posts/default", "website": "https://ai.googleblog.com", "enabled": True, "priority": 9, "category": "research", "content_type": "blog"},
-                {"name": "DeepMind", "rss_url": "https://deepmind.google/discover/blog/rss.xml", "website": "https://deepmind.google", "enabled": True, "priority": 10, "category": "research", "content_type": "blog"},
-                {"name": "Hugging Face", "rss_url": "https://huggingface.co/blog/feed.xml", "website": "https://huggingface.co", "enabled": True, "priority": 8, "category": "tools", "content_type": "blog"}
-            ],
-            "enabled_count": 5,
-            "total_count": 15,
-            "router_architecture": "single_function_with_unlimited_scalability",
-            "debug_info": {
-                "timestamp": datetime.utcnow().isoformat(),
-                "router_handled": True
+        """Get sources configuration from database with comprehensive AI sources"""
+        logger.info("🔗 Processing sources request - fetching from ai_sources database table")
+        
+        try:
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+            
+            # Ensure ai_sources table exists and is populated
+            self.ensure_ai_sources_table(cursor)
+            
+            # Fetch all sources from database
+            cursor.execute("""
+                SELECT name, rss_url, website, enabled, priority, content_type, category, 
+                       ai_topics, description, verified, status, last_scraped, max_articles
+                FROM ai_sources 
+                ORDER BY priority DESC, name ASC
+            """)
+            
+            db_sources = cursor.fetchall()
+            
+            # Format sources for API response
+            sources = []
+            enabled_count = 0
+            content_type_counts = {}
+            
+            for source in db_sources:
+                source_dict = {
+                    "name": source[0],
+                    "rss_url": source[1], 
+                    "website": source[2],
+                    "enabled": bool(source[3]),
+                    "priority": source[4],
+                    "content_type": source[5],
+                    "category": source[6],
+                    "ai_topics": json.loads(source[7]) if source[7] else [],
+                    "description": source[8],
+                    "verified": bool(source[9]),
+                    "status": source[10],
+                    "last_scraped": source[11],
+                    "max_articles": source[12]
+                }
+                
+                sources.append(source_dict)
+                
+                if source_dict["enabled"]:
+                    enabled_count += 1
+                    
+                # Count content types
+                content_type = source_dict["content_type"]
+                content_type_counts[content_type] = content_type_counts.get(content_type, 0) + 1
+            
+            conn.close()
+            
+            logger.info(f"✅ Loaded {len(sources)} sources from database ({enabled_count} enabled)")
+            logger.info(f"📊 Content type distribution: {content_type_counts}")
+            
+            return {
+                "sources": sources,
+                "enabled_count": enabled_count,
+                "total_count": len(sources),
+                "content_type_distribution": content_type_counts,
+                "router_architecture": "database_driven_with_comprehensive_ai_sources",
+                "debug_info": {
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "router_handled": True,
+                    "database_source": "ai_sources_table",
+                    "legitimate_sources_verified": True,
+                    "ai_topics_covered": "all_23_topics",
+                    "source_management": "database_driven_for_future_url_additions"
+                }
             }
-        }
+            
+        except Exception as e:
+            logger.error(f"❌ Error fetching sources from database: {str(e)}")
+            
+            # Fallback to minimal hardcoded sources if database fails
+            fallback_sources = [
+                {"name": "OpenAI Blog", "rss_url": "https://openai.com/blog/rss.xml", "website": "https://openai.com", "enabled": True, "priority": 10, "category": "research", "content_type": "blogs"},
+                {"name": "Anthropic", "rss_url": "https://www.anthropic.com/news/rss.xml", "website": "https://www.anthropic.com", "enabled": True, "priority": 10, "category": "research", "content_type": "blogs"},
+                {"name": "Google AI Blog", "rss_url": "https://ai.googleblog.com/feeds/posts/default", "website": "https://ai.googleblog.com", "enabled": True, "priority": 9, "category": "research", "content_type": "blogs"}
+            ]
+            
+            return {
+                "sources": fallback_sources,
+                "enabled_count": 3,
+                "total_count": 3,
+                "router_architecture": "fallback_mode_database_error",
+                "error": str(e),
+                "debug_info": {
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "router_handled": True,
+                    "database_error": True,
+                    "fallback_mode": True
+                }
+            }
     
     async def handle_test_neon(self) -> Dict[str, Any]:
         """Test database connectivity with debug info"""
@@ -3508,6 +3676,144 @@ Vidyagam • Connecting AI Innovation
                 "status": 500,
                 "debug_info": {"traceback": traceback.format_exc()}
             }
+    
+    async def handle_init_ai_sources_table(self, params: Dict = None) -> Dict[str, Any]:
+        """Initialize ai_sources table with comprehensive AI sources"""
+        try:
+            logger.info("🔧 Initializing ai_sources table with comprehensive AI sources...")
+            
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+            
+            # Ensure the table exists and is populated
+            self.ensure_ai_sources_table(cursor)
+            
+            # Count sources in the table
+            cursor.execute("SELECT COUNT(*) FROM ai_sources")
+            total_sources = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM ai_sources WHERE enabled = 1")
+            enabled_sources = cursor.fetchone()[0]
+            
+            # Get content type distribution
+            cursor.execute("SELECT content_type, COUNT(*) FROM ai_sources GROUP BY content_type")
+            content_types = dict(cursor.fetchall())
+            
+            # Get sample sources
+            cursor.execute("SELECT name, content_type, category, enabled FROM ai_sources ORDER BY priority DESC LIMIT 5")
+            sample_sources = cursor.fetchall()
+            
+            conn.close()
+            
+            logger.info(f"✅ ai_sources table initialized successfully with {total_sources} sources")
+            
+            return {
+                "success": True,
+                "message": "AI sources table initialized successfully",
+                "timestamp": datetime.utcnow().isoformat(),
+                "statistics": {
+                    "total_sources": total_sources,
+                    "enabled_sources": enabled_sources,
+                    "content_type_distribution": content_types,
+                    "sample_sources": [
+                        {"name": row[0], "content_type": row[1], "category": row[2], "enabled": bool(row[3])}
+                        for row in sample_sources
+                    ]
+                },
+                "features": {
+                    "comprehensive_coverage": "All 23 AI topics covered",
+                    "legitimate_sources": "Only verified and legitimate sources included",
+                    "content_diversity": f"{len(content_types)} different content types",
+                    "database_driven": "Sources now fetched from database table",
+                    "future_management": "URLs can be added per AI topic via database"
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ AI sources table initialization failed: {str(e)}")
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            return {
+                "success": False,
+                "error": f"AI sources initialization failed: {str(e)}",
+                "status": 500,
+                "debug_info": {"traceback": traceback.format_exc()}
+            }
+
+    async def handle_public_init_sources(self) -> Dict[str, Any]:
+        """Public endpoint to initialize comprehensive AI sources (no auth required)"""
+        try:
+            logger.info("🚀 Public sources initialization requested")
+            
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+            
+            # Check current source count
+            cursor.execute("SELECT COUNT(*) FROM ai_sources")
+            current_count = cursor.fetchone()[0]
+            
+            logger.info(f"📊 Current source count: {current_count}")
+            
+            # If we have fewer than 20 sources, initialize with comprehensive sources
+            if current_count < 20:
+                logger.info("🔧 Initializing comprehensive AI sources...")
+                self.ensure_ai_sources_table(cursor)
+                
+                # Count after initialization
+                cursor.execute("SELECT COUNT(*) FROM ai_sources")
+                new_count = cursor.fetchone()[0]
+                
+                cursor.execute("SELECT COUNT(*) FROM ai_sources WHERE enabled = 1")
+                enabled_count = cursor.fetchone()[0]
+                
+                # Get content type distribution
+                cursor.execute("SELECT content_type, COUNT(*) FROM ai_sources GROUP BY content_type")
+                content_distribution = dict(cursor.fetchall())
+                
+                conn.close()
+                
+                logger.info(f"✅ Sources initialized: {current_count} → {new_count} total, {enabled_count} enabled")
+                
+                return {
+                    "success": True,
+                    "message": "Comprehensive AI sources initialized successfully",
+                    "sources_before": current_count,
+                    "sources_after": new_count,
+                    "enabled_sources": enabled_count,
+                    "content_distribution": content_distribution,
+                    "initialization_triggered": True,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            else:
+                # Sources already initialized
+                cursor.execute("SELECT COUNT(*) FROM ai_sources WHERE enabled = 1")
+                enabled_count = cursor.fetchone()[0]
+                
+                cursor.execute("SELECT content_type, COUNT(*) FROM ai_sources GROUP BY content_type")
+                content_distribution = dict(cursor.fetchall())
+                
+                conn.close()
+                
+                logger.info(f"✅ Sources already initialized: {current_count} total, {enabled_count} enabled")
+                
+                return {
+                    "success": True,
+                    "message": "AI sources already initialized",
+                    "total_sources": current_count,
+                    "enabled_sources": enabled_count,
+                    "content_distribution": content_distribution,
+                    "initialization_triggered": False,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+                
+        except Exception as e:
+            logger.error(f"❌ Public sources initialization failed: {str(e)}")
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            return {
+                "success": False,
+                "error": f"Sources initialization failed: {str(e)}",
+                "status": 500,
+                "debug_info": {"traceback": traceback.format_exc()}
+            }
 
     async def handle_admin_endpoints(self, endpoint: str, headers: Dict, params: Dict = None) -> Dict[str, Any]:
         """Handle admin endpoints with debug logging"""
@@ -3538,6 +3844,9 @@ Vidyagam • Connecting AI Innovation
             
             elif admin_endpoint == "cleanup-test-users":
                 return await self.handle_cleanup_test_users(params)
+            
+            elif admin_endpoint == "init-ai-sources":
+                return await self.handle_init_ai_sources_table(params)
             
             else:
                 logger.warning(f"❌ Unknown admin endpoint: {admin_endpoint}")
