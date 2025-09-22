@@ -25,7 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-print("🚂 AI News Scraper API Router - Railway Deployment with Persistent Storage (Updated)")
+print("🚂 AI News Scraper API Router - Railway Deployment with Persistent Storage")
 print(f"📍 Startup Time: {datetime.utcnow().isoformat()}")
 print(f"🗄️ Railway Persistent Storage: Enabled")
 
@@ -508,7 +508,438 @@ class AINewsRouter:
         from comprehensive_ai_sources import COMPREHENSIVE_AI_SOURCES
         comprehensive_sources = COMPREHENSIVE_AI_SOURCES
         
-        # Insert all sources with meta_tags column included
+        # OLD INLINE DATA REMOVED - Now using external comprehensive_ai_sources.py
+        # ============================================================================
+            # MACHINE LEARNING & DEEP LEARNING SOURCES
+            # ============================================================================
+            {
+                "name": "Papers With Code",
+                "rss_url": "https://paperswithcode.com/feed.xml",
+                "website": "https://paperswithcode.com",
+                "content_type": "blogs",
+                "category": "research",
+                "ai_topics": '["machine-learning", "deep-learning", "ai-research"]',
+                "description": "Latest ML papers with code implementations",
+                "verified": True,
+                "priority": 1
+            },
+            {
+                "name": "Distill.pub",
+                "rss_url": "https://distill.pub/rss.xml",
+                "website": "https://distill.pub",
+                "content_type": "blogs",
+                "category": "research",
+                "ai_topics": '["machine-learning", "deep-learning", "educational-content"]',
+                "description": "Visual explanations of ML concepts",
+                "verified": True,
+                "priority": 1
+            },
+            {
+                "name": "Towards Data Science",
+                "rss_url": "https://towardsdatascience.com/feed",
+                "website": "https://towardsdatascience.com",
+                "content_type": "blogs",
+                "category": "education",
+                "ai_topics": '["machine-learning", "deep-learning", "data-science", "educational-content"]',
+                "description": "Comprehensive data science and ML articles",
+                "verified": True,
+                "priority": 2
+            },
+            
+            # ============================================================================
+            # MAJOR AI COMPANIES & RESEARCH LABS
+            # ============================================================================
+            {
+                "name": "OpenAI Blog",
+                "rss_url": "https://openai.com/blog/rss.xml",
+                "website": "https://openai.com/blog",
+                "content_type": "blogs",
+                "category": "company",
+                "ai_topics": '["ai-research", "deep-learning", "industry-news", "strategic-implications"]',
+                "description": "Official OpenAI research and announcements",
+                "verified": True,
+                "priority": 1
+            },
+            {
+                "name": "Anthropic Blog",
+                "rss_url": "https://www.anthropic.com/news/rss.xml",
+                "website": "https://www.anthropic.com/news",
+                "content_type": "blogs",
+                "category": "company",
+                "ai_topics": '["ai-research", "ai-ethics-and-safety", "industry-news"]',
+                "description": "Anthropic research and safety-focused AI",
+                "verified": True,
+                "priority": 1
+            },
+            {
+                "name": "Google AI Blog",
+                "rss_url": "https://ai.googleblog.com/feeds/posts/default",
+                "website": "https://ai.googleblog.com",
+                "content_type": "blogs",
+                "category": "company",
+                "ai_topics": '["ai-research", "machine-learning", "applied-ai", "cloud-computing"]',
+                "description": "Google's AI research and applications",
+                "verified": True,
+                "priority": 1
+            },
+            {
+                "name": "DeepMind Blog",
+                "rss_url": "https://deepmind.google/discover/blog/rss.xml",
+                "website": "https://deepmind.google/discover/blog",
+                "content_type": "blogs",
+                "category": "research",
+                "ai_topics": '["ai-research", "deep-learning", "strategic-implications"]',
+                "description": "DeepMind's cutting-edge AI research",
+                "verified": True,
+                "priority": 1
+            },
+            {
+                "name": "Meta AI Blog",
+                "rss_url": "https://ai.meta.com/blog/rss",
+                "website": "https://ai.meta.com/blog",
+                "content_type": "blogs",
+                "category": "company",
+                "ai_topics": '["ai-research", "deep-learning", "applied-ai"]',
+                "description": "Meta's AI research and developments",
+                "verified": True,
+                "priority": 1
+            },
+            {
+                "name": "Microsoft AI Blog",
+                "rss_url": "https://blogs.microsoft.com/ai/feed/",
+                "website": "https://blogs.microsoft.com/ai/",
+                "content_type": "blogs",
+                "category": "company",
+                "ai_topics": '["applied-ai", "cloud-computing", "industry-news", "tools-and-frameworks"]',
+                "description": "Microsoft's AI innovations and applications",
+                "verified": True,
+                "priority": 1
+            },
+            {
+                "name": "NVIDIA AI Blog",
+                "rss_url": "https://blogs.nvidia.com/blog/category/artificial-intelligence/feed",
+                "website": "https://blogs.nvidia.com/blog/category/artificial-intelligence",
+                "content_type": "blogs",
+                "category": "company",
+                "ai_topics": '["deep-learning", "applied-ai", "cloud-computing", "robotics"]',
+                "description": "NVIDIA's AI and GPU computing advances",
+                "verified": True,
+                "priority": 1
+            },
+            
+            # ============================================================================
+            # ACADEMIC & RESEARCH INSTITUTIONS
+            # ============================================================================
+            {
+                "name": "MIT CSAIL",
+                "rss_url": "https://www.csail.mit.edu/news/rss.xml",
+                "website": "https://www.csail.mit.edu/news",
+                "content_type": "blogs",
+                "category": "research",
+                "ai_topics": '["ai-research", "machine-learning", "robotics", "educational-content"]',
+                "description": "MIT Computer Science and AI Lab research",
+                "verified": True,
+                "priority": 1
+            },
+            {
+                "name": "Stanford HAI",
+                "rss_url": "https://hai.stanford.edu/news/rss.xml",
+                "website": "https://hai.stanford.edu/news",
+                "content_type": "blogs",
+                "category": "research",
+                "ai_topics": '["ai-research", "ai-ethics-and-safety", "policy-and-regulation", "strategic-implications"]',
+                "description": "Stanford Human-Centered AI Institute",
+                "verified": True,
+                "priority": 1
+            },
+            {
+                "name": "Berkeley AI Research",
+                "rss_url": "https://bair.berkeley.edu/blog/feed.xml",
+                "website": "https://bair.berkeley.edu/blog",
+                "content_type": "blogs",
+                "category": "research",
+                "ai_topics": '["ai-research", "machine-learning", "robotics", "deep-learning"]',
+                "description": "UC Berkeley AI research blog",
+                "verified": True,
+                "priority": 1
+            },
+            {
+                "name": "CMU Machine Learning",
+                "rss_url": "https://blog.ml.cmu.edu/feed",
+                "website": "https://blog.ml.cmu.edu",
+                "content_type": "blogs",
+                "category": "research",
+                "ai_topics": '["machine-learning", "ai-research", "educational-content"]',
+                "description": "Carnegie Mellon ML department blog",
+                "verified": True,
+                "priority": 1
+            },
+            
+            # ============================================================================
+            # AI ETHICS & POLICY SOURCES
+            # ============================================================================
+            {
+                "name": "AI Now Institute",
+                "rss_url": "https://ainowinstitute.org/feed",
+                "website": "https://ainowinstitute.org",
+                "content_type": "blogs",
+                "category": "policy",
+                "ai_topics": '["ai-ethics-and-safety", "policy-and-regulation", "strategic-implications"]',
+                "description": "AI policy and social implications research",
+                "verified": True,
+                "priority": 1
+            },
+            {
+                "name": "Partnership on AI",
+                "rss_url": "https://www.partnershiponai.org/feed/",
+                "website": "https://www.partnershiponai.org",
+                "content_type": "blogs",
+                "category": "policy",
+                "ai_topics": '["ai-ethics-and-safety", "policy-and-regulation", "basic-ethics"]',
+                "description": "Collaborative AI safety and ethics",
+                "verified": True,
+                "priority": 2
+            },
+            
+            # ============================================================================
+            # EDUCATIONAL & LEARNING SOURCES
+            # ============================================================================
+            {
+                "name": "Fast.ai",
+                "rss_url": "https://www.fast.ai/feed.xml",
+                "website": "https://www.fast.ai",
+                "content_type": "learn",
+                "category": "education",
+                "ai_topics": '["educational-content", "deep-learning", "machine-learning"]',
+                "description": "Practical deep learning courses and tutorials",
+                "verified": True,
+                "priority": 1
+            },
+            {
+                "name": "Coursera AI Blog",
+                "rss_url": "https://blog.coursera.org/feed/",
+                "website": "https://blog.coursera.org",
+                "content_type": "learn",
+                "category": "education",
+                "ai_topics": '["educational-content", "career-trends", "project-ideas"]',
+                "description": "AI education and career guidance",
+                "verified": True,
+                "priority": 2
+            },
+            
+            # ============================================================================
+            # PODCASTS & AUDIO CONTENT
+            # ============================================================================
+            {
+                "name": "Lex Fridman Podcast",
+                "rss_url": "https://lexfridman.com/feed/podcast/",
+                "website": "https://lexfridman.com/podcast/",
+                "content_type": "podcasts",
+                "category": "interviews",
+                "ai_topics": '["podcasts-and-interviews", "ai-research", "leadership-and-innovation", "strategic-implications"]',
+                "description": "Long-form AI conversations with leaders",
+                "verified": True,
+                "priority": 1
+            },
+            {
+                "name": "The AI Podcast by NVIDIA",
+                "rss_url": "https://blogs.nvidia.com/ai-podcast/feed/",
+                "website": "https://blogs.nvidia.com/ai-podcast/",
+                "content_type": "podcasts",
+                "category": "industry",
+                "ai_topics": '["podcasts-and-interviews", "applied-ai", "industry-news"]',
+                "description": "AI innovations and applications",
+                "verified": True,
+                "priority": 1
+            },
+            {
+                "name": "TWIML AI Podcast",
+                "rss_url": "https://twimlai.com/feed/podcast/",
+                "website": "https://twimlai.com/podcast/",
+                "content_type": "podcasts",
+                "category": "technical",
+                "ai_topics": '["podcasts-and-interviews", "machine-learning", "applied-ai"]',
+                "description": "This Week in Machine Learning & AI",
+                "verified": True,
+                "priority": 1
+            },
+            {
+                "name": "Machine Learning Street Talk",
+                "rss_url": "https://anchor.fm/s/26e1b2b8/podcast/rss",
+                "website": "https://www.youtube.com/c/MachineLearningStreetTalk",
+                "content_type": "podcasts",
+                "category": "technical",
+                "ai_topics": '["podcasts-and-interviews", "machine-learning", "ai-research"]',
+                "description": "Technical ML discussions and debates",
+                "verified": True,
+                "priority": 1
+            },
+            
+            # ============================================================================
+            # VIDEO CONTENT & EDUCATIONAL CHANNELS
+            # ============================================================================
+            {
+                "name": "Two Minute Papers",
+                "rss_url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCbfYPyITQ-7l4upoX8nvctg",
+                "website": "https://www.youtube.com/c/TwoMinutePapers",
+                "content_type": "videos",
+                "category": "education",
+                "ai_topics": '["ai-research", "machine-learning", "fun-and-interesting-ai", "educational-content"]',
+                "description": "AI research papers explained visually",
+                "verified": True,
+                "priority": 1
+            },
+            {
+                "name": "3Blue1Brown",
+                "rss_url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCYO_jab_esuFRV4b17AJtAw",
+                "website": "https://www.youtube.com/c/3blue1brown",
+                "content_type": "videos",
+                "category": "education",
+                "ai_topics": '["educational-content", "machine-learning", "deep-learning"]',
+                "description": "Mathematical concepts explained visually",
+                "verified": True,
+                "priority": 1
+            },
+            {
+                "name": "DeepLearning.AI YouTube",
+                "rss_url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCcIXc5mJsHVYTZR1maL5l9w",
+                "website": "https://www.youtube.com/c/Deeplearningai",
+                "content_type": "videos",
+                "category": "education",
+                "ai_topics": '["educational-content", "deep-learning", "machine-learning", "career-trends"]',
+                "description": "Andrew Ng's ML educational content",
+                "verified": True,
+                "priority": 1
+            },
+            {
+                "name": "AI Explained",
+                "rss_url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCNJ1Ymd5yFuUPtn21xtRbbw",
+                "website": "https://www.youtube.com/c/AIExplained-Official",
+                "content_type": "videos",
+                "category": "education",
+                "ai_topics": '["ai-explained", "educational-content", "ai-research"]',
+                "description": "Clear AI explanations and analysis",
+                "verified": True,
+                "priority": 1
+            },
+            
+            # ============================================================================
+            # INDUSTRY NEWS & BUSINESS SOURCES
+            # ============================================================================
+            {
+                "name": "VentureBeat AI",
+                "rss_url": "https://venturebeat.com/ai/feed/",
+                "website": "https://venturebeat.com/ai/",
+                "content_type": "blogs",
+                "category": "business",
+                "ai_topics": '["industry-news", "investment-and-funding", "applied-ai", "career-trends"]',
+                "description": "AI business news and trends",
+                "verified": True,
+                "priority": 2
+            },
+            {
+                "name": "TechCrunch AI",
+                "rss_url": "https://techcrunch.com/category/artificial-intelligence/feed/",
+                "website": "https://techcrunch.com/category/artificial-intelligence/",
+                "content_type": "blogs",
+                "category": "business",
+                "ai_topics": '["industry-news", "investment-and-funding", "applied-ai"]',
+                "description": "AI startup and business coverage",
+                "verified": True,
+                "priority": 2
+            },
+            {
+                "name": "The Information AI",
+                "rss_url": "https://www.theinformation.com/briefings/artificial-intelligence",
+                "website": "https://www.theinformation.com/briefings/artificial-intelligence",
+                "content_type": "blogs",
+                "category": "business",
+                "ai_topics": '["industry-news", "strategic-implications", "leadership-and-innovation"]',
+                "description": "Premium AI industry analysis",
+                "verified": True,
+                "priority": 2
+            },
+            
+            # ============================================================================
+            # ROBOTICS & APPLICATION-SPECIFIC SOURCES
+            # ============================================================================
+            {
+                "name": "IEEE Robotics & AI",
+                "rss_url": "https://spectrum.ieee.org/rss/robotics/fulltext",
+                "website": "https://spectrum.ieee.org/robotics",
+                "content_type": "blogs",
+                "category": "robotics",
+                "ai_topics": '["robotics", "applied-ai", "ai-research"]',
+                "description": "Robotics and automation advances",
+                "verified": True,
+                "priority": 1
+            },
+            {
+                "name": "The Robot Report",
+                "rss_url": "https://www.therobotreport.com/feed/",
+                "website": "https://www.therobotreport.com",
+                "content_type": "blogs",
+                "category": "robotics",
+                "ai_topics": '["robotics", "applied-ai", "industry-news"]',
+                "description": "Robotics industry news and analysis",
+                "verified": True,
+                "priority": 2
+            },
+            
+            # ============================================================================
+            # TOOLS & PLATFORMS
+            # ============================================================================
+            {
+                "name": "Hugging Face Blog",
+                "rss_url": "https://huggingface.co/blog/feed.xml",
+                "website": "https://huggingface.co/blog",
+                "content_type": "blogs",
+                "category": "platform",
+                "ai_topics": '["tools-and-frameworks", "machine-learning", "applied-ai"]',
+                "description": "Open-source ML tools and models",
+                "verified": True,
+                "priority": 1
+            },
+            {
+                "name": "Weights & Biases Blog",
+                "rss_url": "https://wandb.ai/fully-connected/rss.xml",
+                "website": "https://wandb.ai/blog",
+                "content_type": "blogs",
+                "category": "tools",
+                "ai_topics": '["tools-and-frameworks", "machine-learning", "case-studies"]',
+                "description": "ML experiment tracking and tools",
+                "verified": True,
+                "priority": 2
+            },
+            
+            # ============================================================================
+            # CLOUD & INFRASTRUCTURE
+            # ============================================================================
+            {
+                "name": "AWS AI Blog",
+                "rss_url": "https://aws.amazon.com/blogs/machine-learning/feed/",
+                "website": "https://aws.amazon.com/blogs/machine-learning/",
+                "content_type": "blogs",
+                "category": "cloud",
+                "ai_topics": '["cloud-computing", "applied-ai", "tools-and-frameworks"]',
+                "description": "AWS machine learning services and tutorials",
+                "verified": True,
+                "priority": 2
+            },
+            {
+                "name": "Google Cloud AI Blog",
+                "rss_url": "https://cloud.google.com/blog/products/ai-machine-learning/rss",
+                "website": "https://cloud.google.com/blog/products/ai-machine-learning",
+                "content_type": "blogs",
+                "category": "cloud",
+                "ai_topics": '["cloud-computing", "applied-ai", "tools-and-frameworks"]',
+                "description": "Google Cloud AI and ML platform updates",
+                "verified": True,
+                "priority": 2
+            }
+        ]
+        
+        # Insert all sources
         for source in comprehensive_sources:
             cursor.execute("""
                 INSERT INTO ai_sources (
@@ -529,25 +960,7 @@ class AINewsRouter:
                 True
             ))
         
-        logger.info(f"✅ Populated {len(comprehensive_sources)} AI sources covering all 23 AI topics with meta tags")
-    
-    def ensure_ai_sources_table(self, cursor):
-        """Ensure ai_sources table exists and is populated with comprehensive sources"""
-        try:
-            # Check if table exists and has data
-            cursor.execute("SELECT COUNT(*) as count FROM ai_sources")
-            existing_count = cursor.fetchone()['count']
-            
-            if existing_count == 0:
-                logger.info("📥 ai_sources table empty, populating with comprehensive sources...")
-                self.populate_ai_sources_table(cursor)
-            else:
-                logger.info(f"📊 ai_sources table has {existing_count} sources")
-                
-        except Exception as e:
-            logger.error(f"❌ Error ensuring ai_sources table: {str(e)}")
-            # Table might not exist, let it be created by schema initialization
-            logger.info("🔄 Will populate on next schema initialization")
+        logger.info(f"✅ Populated {len(comprehensive_sources)} AI sources covering all 23 AI topics")
     
     async def route_request(self, endpoint: str, method: str = "GET", params: Dict = None, headers: Dict = None, body: Dict = None) -> Dict[str, Any]:
         """Main router function - handles ALL API endpoints with debug logging"""
@@ -572,9 +985,6 @@ class AINewsRouter:
             elif endpoint == "sources":
                 logger.info("🔗 Routing to sources handler")
                 return await self.handle_sources()
-            elif endpoint == "init-sources":
-                logger.info("🚀 Routing to public sources initialization handler")
-                return await self.handle_public_init_sources()
             elif endpoint == "test-neon":
                 logger.info("🧪 Routing to test-neon handler")
                 return await self.handle_test_neon()
@@ -608,7 +1018,7 @@ class AINewsRouter:
                 return {
                     "error": f"Endpoint '{endpoint}' not found in router",
                     "available_endpoints": [
-                        "health", "digest", "sources", "init-sources", "test-neon", "content-types", "content/*",
+                        "health", "digest", "sources", "test-neon", "content-types", "content/*",
                         "personalized-digest", "user-preferences", "auth/*", "admin/*"
                     ],
                     "router_architecture": "single_function",
@@ -3739,82 +4149,6 @@ Vidyagam • Connecting AI Innovation
                 "debug_info": {"traceback": traceback.format_exc()}
             }
 
-    async def handle_public_init_sources(self) -> Dict[str, Any]:
-        """Public endpoint to initialize comprehensive AI sources (no auth required)"""
-        try:
-            logger.info("🚀 Public sources initialization requested")
-            
-            conn = self.get_db_connection()
-            cursor = conn.cursor()
-            
-            # Check current source count
-            cursor.execute("SELECT COUNT(*) FROM ai_sources")
-            current_count = cursor.fetchone()[0]
-            
-            logger.info(f"📊 Current source count: {current_count}")
-            
-            # If we have fewer than 20 sources, initialize with comprehensive sources
-            if current_count < 20:
-                logger.info("🔧 Initializing comprehensive AI sources...")
-                self.ensure_ai_sources_table(cursor)
-                
-                # Count after initialization
-                cursor.execute("SELECT COUNT(*) FROM ai_sources")
-                new_count = cursor.fetchone()[0]
-                
-                cursor.execute("SELECT COUNT(*) FROM ai_sources WHERE enabled = 1")
-                enabled_count = cursor.fetchone()[0]
-                
-                # Get content type distribution
-                cursor.execute("SELECT content_type, COUNT(*) FROM ai_sources GROUP BY content_type")
-                content_distribution = dict(cursor.fetchall())
-                
-                conn.close()
-                
-                logger.info(f"✅ Sources initialized: {current_count} → {new_count} total, {enabled_count} enabled")
-                
-                return {
-                    "success": True,
-                    "message": "Comprehensive AI sources initialized successfully",
-                    "sources_before": current_count,
-                    "sources_after": new_count,
-                    "enabled_sources": enabled_count,
-                    "content_distribution": content_distribution,
-                    "initialization_triggered": True,
-                    "timestamp": datetime.utcnow().isoformat()
-                }
-            else:
-                # Sources already initialized
-                cursor.execute("SELECT COUNT(*) FROM ai_sources WHERE enabled = 1")
-                enabled_count = cursor.fetchone()[0]
-                
-                cursor.execute("SELECT content_type, COUNT(*) FROM ai_sources GROUP BY content_type")
-                content_distribution = dict(cursor.fetchall())
-                
-                conn.close()
-                
-                logger.info(f"✅ Sources already initialized: {current_count} total, {enabled_count} enabled")
-                
-                return {
-                    "success": True,
-                    "message": "AI sources already initialized",
-                    "total_sources": current_count,
-                    "enabled_sources": enabled_count,
-                    "content_distribution": content_distribution,
-                    "initialization_triggered": False,
-                    "timestamp": datetime.utcnow().isoformat()
-                }
-                
-        except Exception as e:
-            logger.error(f"❌ Public sources initialization failed: {str(e)}")
-            logger.error(f"❌ Traceback: {traceback.format_exc()}")
-            return {
-                "success": False,
-                "error": f"Sources initialization failed: {str(e)}",
-                "status": 500,
-                "debug_info": {"traceback": traceback.format_exc()}
-            }
-
     async def handle_admin_endpoints(self, endpoint: str, headers: Dict, params: Dict = None) -> Dict[str, Any]:
         """Handle admin endpoints with debug logging"""
         try:
@@ -4055,7 +4389,7 @@ async def root():
     logger.info("🏠 Root endpoint accessed")
     return {
         "service": "AI News Scraper",
-        "version": "2.1.0",
+        "version": "2.0.0",
         "platform": "Railway",
         "architecture": "single_function_router",
         "scalability": "unlimited_endpoints",
