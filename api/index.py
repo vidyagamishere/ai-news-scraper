@@ -744,6 +744,9 @@ class AINewsRouter:
             conn.commit()
             conn.close()
             
+            # Auto-populate article-topic mappings if junction table is empty
+            self.auto_populate_article_topic_mappings()
+            
             logger.info("✅ Database schema initialization completed successfully")
             
         except Exception as e:
@@ -958,6 +961,53 @@ class AINewsRouter:
         logger.info("🧠 AI topics created:")
         for row in topics:
             logger.info(f"   ID {row[0]}: {row[1]} → {row[3]} ({row[2]})")
+    
+    def auto_populate_article_topic_mappings(self):
+        """Automatically populate article-topic mappings if junction table is empty"""
+        try:
+            logger.info("🔗 Checking article-topic mappings...")
+            
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+            
+            # Check if junction table has any mappings
+            cursor.execute("SELECT COUNT(*) FROM article_topics")
+            mapping_count = cursor.fetchone()[0]
+            
+            if mapping_count > 0:
+                logger.info(f"📊 Found {mapping_count} existing article-topic mappings, skipping auto-population")
+                conn.close()
+                return
+            
+            # Check if we have articles and topics to map
+            cursor.execute("SELECT COUNT(*) FROM articles")
+            article_count = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM ai_topics")
+            topic_count = cursor.fetchone()[0]
+            
+            if article_count == 0 or topic_count == 0:
+                logger.info(f"📊 Insufficient data for mapping (articles: {article_count}, topics: {topic_count})")
+                conn.close()
+                return
+            
+            logger.info(f"🧠 Auto-populating mappings for {article_count} articles to {topic_count} topics...")
+            
+            # Get all articles
+            cursor.execute("SELECT id, source, title, COALESCE(content, summary, '') as content FROM articles")
+            articles = cursor.fetchall()
+            
+            mapped_count = 0
+            for article in articles:
+                article_id, source, title, content = article
+                self.map_article_to_topics(article_id, source or "", title or "", content or "")
+                mapped_count += 1
+            
+            conn.close()
+            logger.info(f"✅ Auto-populated {mapped_count} article-topic mappings")
+            
+        except Exception as e:
+            logger.error(f"❌ Auto-population of article-topic mappings failed: {str(e)}")
     
     def populate_ai_sources_table(self, cursor):
         """Populate AI sources table with comprehensive legitimate sources covering ALL 23 AI topics"""
