@@ -4900,7 +4900,7 @@ Vidyagam • Connecting AI Innovation
             
             # Comprehensive AI topic sources based on research (using correct topic IDs from database)
             comprehensive_topic_sources = {
-                # Machine Learning (topic_id: machine-learning)
+                # Try various topic IDs that might exist
                 'machine-learning': [
                     {
                         'title': 'Google DeepMind Research Publications',
@@ -5140,15 +5140,25 @@ Vidyagam • Connecting AI Innovation
                         article_id = cursor.lastrowid
                         
                         # Map to topic if possible (using topic_id field, not id)
-                        cursor.execute("SELECT id FROM ai_topics WHERE topic_id = ?", (topic_id,))
+                        logger.info(f"🔍 Looking for topic_id: {topic_id}")
+                        cursor.execute("SELECT id, display_name FROM ai_topics WHERE topic_id = ?", (topic_id,))
                         topic_exists = cursor.fetchone()
                         
                         if topic_exists:
                             topic_db_id = topic_exists[0]  # Get the actual database ID
+                            topic_name = topic_exists[1]  # Get the display name
+                            logger.info(f"✅ Found topic: {topic_name} (ID: {topic_db_id})")
                             cursor.execute("""
                                 INSERT OR IGNORE INTO article_topics (article_id, topic_id, relevance_score)
                                 VALUES (?, ?, ?)
                             """, (article_id, topic_db_id, source['significance_score'] / 10.0))
+                            logger.info(f"🔗 Mapped article {article_id} to topic {topic_db_id}")
+                        else:
+                            logger.warning(f"❌ Topic not found: {topic_id}")
+                            # List available topics for debugging
+                            cursor.execute("SELECT topic_id, display_name FROM ai_topics LIMIT 10")
+                            available_topics = cursor.fetchall()
+                            logger.info(f"📋 Available topics: {available_topics}")
                         
                         logger.info(f"✅ Added: {source['title']}")
                         total_added += 1
