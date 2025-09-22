@@ -843,7 +843,46 @@ class AINewsRouter:
         """Populate ai_topics table with comprehensive AI topic data"""
         logger.info("🧠 Populating ai_topics table with comprehensive AI topics")
         
-        # Check if AI topics already exist
+        # Check if ai_topics table has correct schema (check for topic_id column)
+        try:
+            cursor.execute("SELECT topic_id FROM ai_topics LIMIT 1")
+            schema_correct = True
+        except sqlite3.OperationalError:
+            logger.info("⚠️ Old ai_topics table schema detected, migrating to new schema")
+            schema_correct = False
+            
+        # If schema is incorrect, drop and recreate table
+        if not schema_correct:
+            # Drop both tables to maintain foreign key integrity
+            cursor.execute("DROP TABLE IF EXISTS article_topics")
+            cursor.execute("DROP TABLE IF EXISTS ai_topics")
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS ai_topics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    topic_id TEXT UNIQUE NOT NULL,
+                    display_name TEXT NOT NULL,
+                    description TEXT,
+                    category TEXT NOT NULL,
+                    icon TEXT,
+                    target_roles TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS article_topics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    article_id INTEGER NOT NULL,
+                    topic_id INTEGER NOT NULL,
+                    relevance_score REAL DEFAULT 1.0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (article_id) REFERENCES articles (id) ON DELETE CASCADE,
+                    FOREIGN KEY (topic_id) REFERENCES ai_topics (id) ON DELETE CASCADE,
+                    UNIQUE(article_id, topic_id)
+                )
+            """)
+            logger.info("✅ Recreated ai_topics and article_topics tables with correct schema")
+        
+        # Check if AI topics already exist (after potential recreation)
         cursor.execute("SELECT COUNT(*) as count FROM ai_topics")
         existing_count = cursor.fetchone()['count']
         
