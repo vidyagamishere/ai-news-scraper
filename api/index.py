@@ -289,6 +289,47 @@ class AINewsRouter:
             # CORE TABLES CREATION
             # =================================================================
             
+            # Content Types table - master reference for all content types
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS content_types (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT UNIQUE NOT NULL,
+                    display_name TEXT NOT NULL,
+                    description TEXT,
+                    frontend_section TEXT NOT NULL,
+                    icon TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # AI Topics table - master reference for all AI topics
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS ai_topics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    topic_id TEXT UNIQUE NOT NULL,
+                    display_name TEXT NOT NULL,
+                    description TEXT,
+                    category TEXT NOT NULL,
+                    icon TEXT,
+                    target_roles TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Article Topics junction table - many-to-many relationship between articles and AI topics
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS article_topics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    article_id INTEGER NOT NULL,
+                    topic_id INTEGER NOT NULL,
+                    relevance_score REAL DEFAULT 1.0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (article_id) REFERENCES articles (id) ON DELETE CASCADE,
+                    FOREIGN KEY (topic_id) REFERENCES ai_topics (id) ON DELETE CASCADE,
+                    UNIQUE(article_id, topic_id)
+                )
+            """)
+            
             # Articles table - stores scraped news content
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS articles (
@@ -303,7 +344,15 @@ class AINewsRouter:
                     tags TEXT,
                     significance_score REAL DEFAULT 5.0,
                     content_hash TEXT,
-                    processing_status TEXT DEFAULT 'pending'
+                    processing_status TEXT DEFAULT 'pending',
+                    content_type_id INTEGER DEFAULT 1,
+                    content TEXT,
+                    thumbnail_url TEXT,
+                    audio_url TEXT,
+                    video_url TEXT,
+                    duration TEXT,
+                    read_time TEXT DEFAULT '3 min',
+                    FOREIGN KEY (content_type_id) REFERENCES content_types (id)
                 )
             """)
             
@@ -366,6 +415,56 @@ class AINewsRouter:
             # SCHEMA MIGRATIONS - Handle existing databases
             # =================================================================
             
+            # Add new columns to articles table for unified content storage
+            try:
+                cursor.execute("ALTER TABLE articles ADD COLUMN content_type_id INTEGER DEFAULT 1")
+                logger.info("✅ Added content_type_id column to articles table")
+            except:
+                logger.info("ℹ️ content_type_id column already exists in articles table")
+                
+            # Legacy support - keep old content_type column for backward compatibility during migration
+            try:
+                cursor.execute("ALTER TABLE articles ADD COLUMN content_type TEXT DEFAULT 'blogs'")
+                logger.info("✅ Added content_type column to articles table (legacy support)")
+            except:
+                logger.info("ℹ️ content_type column already exists in articles table")
+            
+            try:
+                cursor.execute("ALTER TABLE articles ADD COLUMN content TEXT")
+                logger.info("✅ Added content column to articles table")
+            except:
+                logger.info("ℹ️ content column already exists in articles table")
+                
+            try:
+                cursor.execute("ALTER TABLE articles ADD COLUMN thumbnail_url TEXT")
+                logger.info("✅ Added thumbnail_url column to articles table")
+            except:
+                logger.info("ℹ️ thumbnail_url column already exists in articles table")
+                
+            try:
+                cursor.execute("ALTER TABLE articles ADD COLUMN audio_url TEXT")
+                logger.info("✅ Added audio_url column to articles table")
+            except:
+                logger.info("ℹ️ audio_url column already exists in articles table")
+                
+            try:
+                cursor.execute("ALTER TABLE articles ADD COLUMN video_url TEXT")
+                logger.info("✅ Added video_url column to articles table")
+            except:
+                logger.info("ℹ️ video_url column already exists in articles table")
+                
+            try:
+                cursor.execute("ALTER TABLE articles ADD COLUMN duration TEXT")
+                logger.info("✅ Added duration column to articles table")
+            except:
+                logger.info("ℹ️ duration column already exists in articles table")
+                
+            try:
+                cursor.execute("ALTER TABLE articles ADD COLUMN read_time TEXT DEFAULT '3 min'")
+                logger.info("✅ Added read_time column to articles table")
+            except:
+                logger.info("ℹ️ read_time column already exists in articles table")
+            
             # Migration: Add missing columns to users table
             required_user_columns = [
                 ('verified_email', 'BOOLEAN', True),
@@ -416,6 +515,14 @@ class AINewsRouter:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_articles_published_date ON articles(published_date)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_articles_significance ON articles(significance_score)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_articles_source ON articles(source)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_articles_content_type_id ON articles(content_type_id)")
+            
+            # Indexes on AI topics and article_topics junction table
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_topics_topic_id ON ai_topics(topic_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_topics_category ON ai_topics(category)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_article_topics_article_id ON article_topics(article_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_article_topics_topic_id ON article_topics(topic_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_article_topics_relevance ON article_topics(relevance_score)")
             
             # Index on users for authentication
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
@@ -458,8 +565,17 @@ class AINewsRouter:
             # Clean up expired OTPs
             cursor.execute("DELETE FROM email_otps WHERE expires_at < ?", (datetime.utcnow().isoformat(),))
             
+            # Populate content types table with master data
+            self.populate_content_types_table(cursor)
+            
+            # Populate AI topics table with comprehensive topic data
+            self.populate_ai_topics_table(cursor)
+            
             # Populate AI sources table with comprehensive legitimate sources
             self.populate_ai_sources_table(cursor)
+            
+            # Sync content types from ai_sources to articles table
+            self.sync_content_types_to_articles(cursor)
             
             # Commit all changes
             conn.commit()
@@ -491,6 +607,155 @@ class AINewsRouter:
             conn = sqlite3.connect(self.db_path)
             conn.row_factory = sqlite3.Row
             return conn
+    
+    def populate_content_types_table(self, cursor):
+        """Populate content_types table with master content type data"""
+        logger.info("📋 Populating content_types table with master data")
+        
+        # Check if content types already exist
+        cursor.execute("SELECT COUNT(*) as count FROM content_types")
+        existing_count = cursor.fetchone()['count']
+        
+        if existing_count > 0:
+            logger.info(f"📊 Found {existing_count} existing content types, skipping population")
+            return
+        
+        # Master content types with frontend mapping
+        content_types = [
+            {
+                "name": "blogs",
+                "display_name": "Blog Articles",
+                "description": "News articles, analysis pieces, and written content",
+                "frontend_section": "blog",
+                "icon": "📝"
+            },
+            {
+                "name": "podcasts", 
+                "display_name": "Podcasts",
+                "description": "Audio content, interviews, and discussions",
+                "frontend_section": "audio",
+                "icon": "🎵"
+            },
+            {
+                "name": "videos",
+                "display_name": "Videos", 
+                "description": "Video content, tutorials, and presentations",
+                "frontend_section": "video",
+                "icon": "🎬"
+            },
+            {
+                "name": "learning",
+                "display_name": "Learning Resources",
+                "description": "Educational content, courses, and tutorials",
+                "frontend_section": "blog",
+                "icon": "📚"
+            },
+            {
+                "name": "events",
+                "display_name": "Events",
+                "description": "Conferences, meetups, and industry events",
+                "frontend_section": "blog", 
+                "icon": "📅"
+            },
+            {
+                "name": "demos",
+                "display_name": "Demos & Showcases",
+                "description": "Product demonstrations and proof of concepts",
+                "frontend_section": "video",
+                "icon": "🚀"
+            }
+        ]
+        
+        # Insert content types
+        for content_type in content_types:
+            cursor.execute("""
+                INSERT INTO content_types (name, display_name, description, frontend_section, icon)
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                content_type["name"],
+                content_type["display_name"], 
+                content_type["description"],
+                content_type["frontend_section"],
+                content_type["icon"]
+            ))
+        
+        logger.info(f"✅ Populated {len(content_types)} content types")
+        
+        # Log the content types for verification
+        cursor.execute("SELECT id, name, display_name, frontend_section FROM content_types ORDER BY id")
+        types = cursor.fetchall()
+        logger.info("📋 Content types created:")
+        for row in types:
+            logger.info(f"   ID {row[0]}: {row[1]} → {row[3]} section ({row[2]})")
+    
+    def populate_ai_topics_table(self, cursor):
+        """Populate ai_topics table with comprehensive AI topic data"""
+        logger.info("🧠 Populating ai_topics table with comprehensive AI topics")
+        
+        # Check if AI topics already exist
+        cursor.execute("SELECT COUNT(*) as count FROM ai_topics")
+        existing_count = cursor.fetchone()['count']
+        
+        if existing_count > 0:
+            logger.info(f"📊 Found {existing_count} existing AI topics, skipping population")
+            return
+        
+        # Comprehensive AI topics covering all aspects of AI development and research
+        ai_topics = [
+            # Novice-friendly topics
+            {"topic_id": "ai-explained", "display_name": "AI Explained", "description": "Simple explanations of AI concepts", "category": "novice", "icon": "🤖", "target_roles": "novice,student"},
+            {"topic_id": "ai-in-everyday-life", "display_name": "AI in Everyday Life", "description": "How AI impacts daily life", "category": "novice", "icon": "🏠", "target_roles": "novice,student"},
+            {"topic_id": "fun-and-interesting-ai", "display_name": "Fun & Interesting AI", "description": "Entertaining AI developments", "category": "novice", "icon": "🎮", "target_roles": "novice,student"},
+            {"topic_id": "basic-ethics", "display_name": "Basic AI Ethics", "description": "Fundamental ethical considerations", "category": "novice", "icon": "⚖️", "target_roles": "novice,student,executive"},
+            
+            # Student-focused topics
+            {"topic_id": "educational-content", "display_name": "Educational Content", "description": "Learning resources and tutorials", "category": "student", "icon": "📚", "target_roles": "student"},
+            {"topic_id": "project-ideas", "display_name": "Project Ideas", "description": "AI project inspiration and guides", "category": "student", "icon": "💡", "target_roles": "student"},
+            {"topic_id": "career-trends", "display_name": "AI Career Trends", "description": "Job market and career opportunities", "category": "student", "icon": "📈", "target_roles": "student,professional"},
+            {"topic_id": "machine-learning", "display_name": "Machine Learning", "description": "ML algorithms and applications", "category": "student", "icon": "🧮", "target_roles": "student,professional"},
+            {"topic_id": "deep-learning", "display_name": "Deep Learning", "description": "Neural networks and deep AI", "category": "student", "icon": "🧠", "target_roles": "student,professional"},
+            {"topic_id": "tools-and-frameworks", "display_name": "AI Tools & Frameworks", "description": "Development tools and platforms", "category": "student", "icon": "🔧", "target_roles": "student,professional"},
+            {"topic_id": "data-science", "display_name": "Data Science", "description": "Data analysis and insights", "category": "student", "icon": "📊", "target_roles": "student,professional"},
+            
+            # Professional topics
+            {"topic_id": "industry-news", "display_name": "Industry News", "description": "AI industry developments", "category": "professional", "icon": "📰", "target_roles": "professional,executive"},
+            {"topic_id": "applied-ai", "display_name": "Applied AI", "description": "Real-world AI implementations", "category": "professional", "icon": "⚙️", "target_roles": "professional"},
+            {"topic_id": "case-studies", "display_name": "Case Studies", "description": "Detailed implementation examples", "category": "professional", "icon": "📋", "target_roles": "professional,executive"},
+            {"topic_id": "podcasts-and-interviews", "display_name": "Podcasts & Interviews", "description": "Expert discussions and insights", "category": "professional", "icon": "🎙️", "target_roles": "professional,executive"},
+            {"topic_id": "cloud-computing", "display_name": "AI & Cloud Computing", "description": "Cloud-based AI solutions", "category": "professional", "icon": "☁️", "target_roles": "professional"},
+            {"topic_id": "robotics", "display_name": "Robotics & Automation", "description": "AI-powered robotics", "category": "professional", "icon": "🤖", "target_roles": "professional"},
+            
+            # Executive-level topics
+            {"topic_id": "ai-ethics-and-safety", "display_name": "AI Ethics & Safety", "description": "Responsible AI development", "category": "executive", "icon": "🛡️", "target_roles": "executive,professional"},
+            {"topic_id": "investment-and-funding", "display_name": "AI Investment & Funding", "description": "Financial aspects of AI", "category": "executive", "icon": "💰", "target_roles": "executive"},
+            {"topic_id": "strategic-implications", "display_name": "Strategic Implications", "description": "Business strategy and AI", "category": "executive", "icon": "🎯", "target_roles": "executive"},
+            {"topic_id": "policy-and-regulation", "display_name": "AI Policy & Regulation", "description": "Government and legal aspects", "category": "executive", "icon": "🏛️", "target_roles": "executive"},
+            {"topic_id": "leadership-and-innovation", "display_name": "AI Leadership", "description": "Leading AI transformation", "category": "executive", "icon": "👔", "target_roles": "executive"},
+            {"topic_id": "ai-research", "display_name": "AI Research", "description": "Latest research and breakthroughs", "category": "executive", "icon": "🔬", "target_roles": "executive,professional"}
+        ]
+        
+        # Insert AI topics
+        for topic in ai_topics:
+            cursor.execute("""
+                INSERT INTO ai_topics (topic_id, display_name, description, category, icon, target_roles)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                topic["topic_id"],
+                topic["display_name"],
+                topic["description"],
+                topic["category"],
+                topic["icon"],
+                topic["target_roles"]
+            ))
+        
+        logger.info(f"✅ Populated {len(ai_topics)} AI topics")
+        
+        # Log the AI topics for verification
+        cursor.execute("SELECT id, topic_id, display_name, category FROM ai_topics ORDER BY category, id")
+        topics = cursor.fetchall()
+        logger.info("🧠 AI topics created:")
+        for row in topics:
+            logger.info(f"   ID {row[0]}: {row[1]} → {row[3]} ({row[2]})")
     
     def populate_ai_sources_table(self, cursor):
         """Populate AI sources table with comprehensive legitimate sources covering ALL 23 AI topics"""
@@ -548,6 +813,61 @@ class AINewsRouter:
             logger.error(f"❌ Error ensuring ai_sources table: {str(e)}")
             # Table might not exist, let it be created by schema initialization
             logger.info("🔄 Will populate on next schema initialization")
+    
+    def sync_content_types_to_articles(self, cursor):
+        """Sync content types from ai_sources to articles table using foreign key relationship"""
+        try:
+            logger.info("🔄 Syncing content types from ai_sources to articles table with foreign keys...")
+            
+            # Update articles content_type_id based on source mapping from ai_sources and content_types
+            cursor.execute("""
+                UPDATE articles 
+                SET content_type_id = (
+                    SELECT content_types.id 
+                    FROM ai_sources 
+                    JOIN content_types ON ai_sources.content_type = content_types.name
+                    WHERE ai_sources.name = articles.source
+                )
+                WHERE EXISTS (
+                    SELECT 1 FROM ai_sources 
+                    WHERE ai_sources.name = articles.source
+                )
+            """)
+            
+            rows_updated = cursor.rowcount
+            logger.info(f"✅ Updated {rows_updated} articles with content_type_id from ai_sources")
+            
+            # Also update legacy content_type column for backward compatibility
+            cursor.execute("""
+                UPDATE articles 
+                SET content_type = (
+                    SELECT ai_sources.content_type 
+                    FROM ai_sources 
+                    WHERE ai_sources.name = articles.source
+                )
+                WHERE EXISTS (
+                    SELECT 1 FROM ai_sources 
+                    WHERE ai_sources.name = articles.source
+                )
+            """)
+            
+            # Log content type distribution for debugging using JOIN
+            cursor.execute("""
+                SELECT ct.name, ct.display_name, ct.frontend_section, COUNT(*) as count 
+                FROM articles a
+                JOIN content_types ct ON a.content_type_id = ct.id
+                GROUP BY ct.id, ct.name, ct.display_name, ct.frontend_section
+                ORDER BY count DESC
+            """)
+            
+            distribution = cursor.fetchall()
+            logger.info("📊 Content type distribution after sync (using foreign keys):")
+            for row in distribution:
+                logger.info(f"   {row[0]} ({row[1]}) → {row[2]} section: {row[3]} articles")
+                
+        except Exception as e:
+            logger.error(f"❌ Error syncing content types: {str(e)}")
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
     
     async def route_request(self, endpoint: str, method: str = "GET", params: Dict = None, headers: Dict = None, body: Dict = None) -> Dict[str, Any]:
         """Main router function - handles ALL API endpoints with debug logging"""
@@ -671,7 +991,8 @@ class AINewsRouter:
                     "scalable": True,
                     "function_limit_solved": True,
                     "auth_integrated": True,
-                    "cors_enabled": True
+                    "cors_enabled": True,
+                    "version": "2.4.0"
                 },
                 "database": {
                     "type": "sqlite",
@@ -785,19 +1106,60 @@ class AINewsRouter:
             conn = self.get_db_connection()
             cursor = conn.cursor()
             
-            # Get recent articles with corrected query (using actual database schema from main.py)
+            # Get recent content from unified articles table with proper foreign key JOINs including topics
             cursor.execute("""
-                SELECT title, content, summary, source, published_date, 
-                       'medium' as impact, 'blog' as type, url, '3 min' as read_time, significance_score,
-                       null as thumbnail_url, null as audio_url, null as duration
-                FROM articles 
-                WHERE published_date IS NOT NULL AND published_date != ''
-                ORDER by significance_score DESC, published_date DESC
+                SELECT 
+                    a.title,
+                    COALESCE(a.content, a.summary) as content,
+                    a.summary,
+                    a.source,
+                    a.published_date,
+                    'medium' as impact,
+                    COALESCE(ct.name, 'blogs') as type,
+                    a.url,
+                    COALESCE(a.read_time, a.duration, '3 min') as read_time,
+                    a.significance_score,
+                    a.thumbnail_url,
+                    a.audio_url,
+                    a.duration,
+                    ct.display_name,
+                    ct.frontend_section,
+                    GROUP_CONCAT(DISTINCT t.topic_id) as topic_ids,
+                    GROUP_CONCAT(DISTINCT t.display_name) as topic_names,
+                    GROUP_CONCAT(DISTINCT t.category) as topic_categories,
+                    GROUP_CONCAT(DISTINCT at.relevance_score) as topic_relevance_scores
+                FROM articles a
+                LEFT JOIN content_types ct ON a.content_type_id = ct.id
+                LEFT JOIN ai_sources ai ON a.source = ai.name
+                LEFT JOIN article_topics at ON a.id = at.article_id
+                LEFT JOIN ai_topics t ON at.topic_id = t.id
+                WHERE a.published_date IS NOT NULL AND a.published_date != ''
+                GROUP BY a.id, a.title, a.content, a.summary, a.source, a.published_date, a.url, 
+                         a.read_time, a.duration, a.significance_score, a.thumbnail_url, a.audio_url,
+                         ct.name, ct.display_name, ct.frontend_section
+                ORDER BY a.significance_score DESC, a.published_date DESC
                 LIMIT 50
             """)
             
             articles = []
             for row in cursor.fetchall():
+                # Parse topic information from GROUP_CONCAT results
+                topic_ids = row[15].split(',') if row[15] else []
+                topic_names = row[16].split(',') if row[16] else []
+                topic_categories = row[17].split(',') if row[17] else []
+                topic_relevance_scores = [float(score) for score in row[18].split(',') if score] if row[18] else []
+                
+                # Create topic objects combining the parsed data
+                topics = []
+                for i, topic_id in enumerate(topic_ids):
+                    if topic_id:  # Only include non-empty topic_ids
+                        topics.append({
+                            "id": topic_id.strip(),
+                            "name": topic_names[i].strip() if i < len(topic_names) else topic_id,
+                            "category": topic_categories[i].strip() if i < len(topic_categories) else "general",
+                            "relevance_score": topic_relevance_scores[i] if i < len(topic_relevance_scores) else 1.0
+                        })
+                
                 articles.append({
                     "title": row[0] or "Untitled",
                     "description": row[1] or "",  # content column
@@ -812,7 +1174,11 @@ class AINewsRouter:
                     "thumbnail_url": row[10],
                     "imageUrl": row[10],
                     "audio_url": row[11],
-                    "duration": row[12]
+                    "duration": row[12],
+                    "content_type_display": row[13],
+                    "frontend_section": row[14],
+                    "topics": topics,  # New: Article topic associations
+                    "topic_count": len(topics)  # New: Number of topics associated
                 })
             
             conn.close()
@@ -885,14 +1251,34 @@ class AINewsRouter:
             else:
                 logger.info("📰 No filtering applied - showing all articles")
             
-            # Organize content by type
+            # Organize content by type using foreign key relationship
             content_by_type = {"blog": [], "audio": [], "video": []}
             top_stories = []
             
+            # Log initial content distribution with foreign key data
+            logger.info(f"📊 Content types from database (with FK): {[(article.get('type', 'unknown'), article.get('frontend_section', 'unknown')) for article in articles[:5]]}")
+            
             for article in articles:
-                content_type = article["type"]
-                if content_type in content_by_type:
-                    content_by_type[content_type].append(article)
+                # Use frontend_section from content_types table (via foreign key JOIN)
+                frontend_section = article.get("frontend_section", "blog")
+                
+                # Fallback to hardcoded mapping if frontend_section is not available
+                if not frontend_section:
+                    content_type = article.get("type", "blogs")
+                    content_type_mapping = {
+                        "blogs": "blog",
+                        "podcasts": "audio", 
+                        "videos": "video",
+                        "learning": "blog",
+                        "events": "blog",
+                        "demos": "video"
+                    }
+                    frontend_section = content_type_mapping.get(content_type, "blog")
+                
+                if frontend_section in content_by_type:
+                    content_by_type[frontend_section].append(article)
+                    
+            logger.info(f"📊 Content distribution (using foreign keys): blog={len(content_by_type['blog'])}, audio={len(content_by_type['audio'])}, video={len(content_by_type['video'])}")
             
             # Generate top stories with personalization for authenticated users
             if is_personalized and user_preferences and not is_preview_mode:
@@ -1468,7 +1854,8 @@ class AINewsRouter:
             "podcasts": ["podcast", "audio", "interview", "conversation", "discussion", "talk"],
             "videos": ["video", "youtube", "tutorial", "presentation", "demo", "webinar"],
             "events": ["conference", "event", "summit", "meetup", "workshop", "webinar", "2024", "2025"],
-            "learn": ["course", "tutorial", "guide", "learn", "education", "training", "certification"]
+            "learning": ["course", "tutorial", "guide", "learn", "education", "training", "certification"],
+            "demos": ["demo", "demonstration", "showcase", "example", "sample", "prototype", "proof of concept"]
         }
         
         keywords = content_keywords.get(content_type, [])
@@ -2105,6 +2492,274 @@ class AINewsRouter:
             logger.info(f"📰 Top filtered article: {scored_articles[0].get('title', 'Unknown')[:60]}")
         
         return scored_articles
+    
+    def filter_articles_by_topics_foreign_key(self, user_topic_ids: List[str], limit: int = 50) -> List[Dict]:
+        """Filter articles using foreign key relationships with ai_topics table"""
+        logger.info(f"🎯 Database-driven topic filtering for topics: {user_topic_ids}")
+        
+        if not user_topic_ids:
+            logger.info("📝 No topics specified, returning all articles")
+            return []
+        
+        conn = self.get_db_connection()
+        cursor = conn.cursor()
+        
+        try:
+            # Create placeholders for the IN clause
+            placeholders = ','.join(['?' for _ in user_topic_ids])
+            
+            # Query articles that match user's topics via foreign key relationship
+            query = f"""
+                SELECT DISTINCT
+                    a.title,
+                    COALESCE(a.content, a.summary) as content,
+                    a.summary,
+                    a.source,
+                    a.published_date,
+                    'medium' as impact,
+                    COALESCE(ct.name, 'blogs') as type,
+                    a.url,
+                    COALESCE(a.read_time, a.duration, '3 min') as read_time,
+                    a.significance_score,
+                    a.thumbnail_url,
+                    a.audio_url,
+                    a.duration,
+                    ct.display_name,
+                    ct.frontend_section,
+                    GROUP_CONCAT(DISTINCT t.topic_id) as topic_ids,
+                    GROUP_CONCAT(DISTINCT t.display_name) as topic_names,
+                    GROUP_CONCAT(DISTINCT t.category) as topic_categories,
+                    GROUP_CONCAT(DISTINCT at.relevance_score) as topic_relevance_scores,
+                    COUNT(DISTINCT at.topic_id) as matched_topic_count,
+                    AVG(at.relevance_score) as avg_relevance_score
+                FROM articles a
+                LEFT JOIN content_types ct ON a.content_type_id = ct.id
+                INNER JOIN article_topics at ON a.id = at.article_id
+                INNER JOIN ai_topics t ON at.topic_id = t.id
+                WHERE t.topic_id IN ({placeholders})
+                    AND a.published_date IS NOT NULL 
+                    AND a.published_date != ''
+                GROUP BY a.id, a.title, a.content, a.summary, a.source, a.published_date, a.url,
+                         a.read_time, a.duration, a.significance_score, a.thumbnail_url, a.audio_url,
+                         ct.name, ct.display_name, ct.frontend_section
+                ORDER BY matched_topic_count DESC, avg_relevance_score DESC, a.significance_score DESC
+                LIMIT ?
+            """
+            
+            # Execute query with user topic IDs and limit
+            cursor.execute(query, user_topic_ids + [limit])
+            
+            articles = []
+            for row in cursor.fetchall():
+                # Parse topic information from GROUP_CONCAT results
+                topic_ids = row[15].split(',') if row[15] else []
+                topic_names = row[16].split(',') if row[16] else []
+                topic_categories = row[17].split(',') if row[17] else []
+                topic_relevance_scores = [float(score) for score in row[18].split(',') if score] if row[18] else []
+                
+                # Create topic objects combining the parsed data
+                topics = []
+                for i, topic_id in enumerate(topic_ids):
+                    if topic_id:  # Only include non-empty topic_ids
+                        topics.append({
+                            "id": topic_id.strip(),
+                            "name": topic_names[i].strip() if i < len(topic_names) else topic_id,
+                            "category": topic_categories[i].strip() if i < len(topic_categories) else "general",
+                            "relevance_score": topic_relevance_scores[i] if i < len(topic_relevance_scores) else 1.0
+                        })
+                
+                article = {
+                    "title": row[0] or "Untitled",
+                    "description": row[1] or "",  # content column
+                    "content_summary": row[2] or row[1] or "",  # summary column
+                    "source": row[3] or "Unknown",
+                    "time": row[4] or datetime.utcnow().isoformat(),  # published_date
+                    "impact": row[5] or "medium",
+                    "type": row[6] or "blog",
+                    "url": row[7] or "#",
+                    "readTime": row[8] or "3 min",
+                    "significanceScore": float(row[9]) if row[9] else 5.0,
+                    "thumbnail_url": row[10],
+                    "imageUrl": row[10],
+                    "audio_url": row[11],
+                    "duration": row[12],
+                    "content_type_display": row[13],
+                    "frontend_section": row[14],
+                    "topics": topics,  # Article topic associations
+                    "topic_count": len(topics),  # Number of topics associated
+                    "matched_topic_count": int(row[19]) if row[19] else 0,  # How many user topics matched
+                    "avg_relevance_score": float(row[20]) if row[20] else 0.0  # Average relevance for matched topics
+                }
+                
+                articles.append(article)
+            
+            conn.close()
+            
+            logger.info(f"🎯 Foreign key topic filtering result: {len(articles)} articles found for topics {user_topic_ids}")
+            if articles:
+                top_article = articles[0]
+                logger.info(f"📰 Top article: '{top_article.get('title', 'Unknown')[:60]}' with {top_article.get('matched_topic_count', 0)} matched topics")
+            
+            return articles
+            
+        except Exception as e:
+            logger.error(f"❌ Error in topic-based filtering: {e}")
+            conn.close()
+            return []
+    
+    def map_article_to_topics(self, article_id: int, source: str, title: str, content: str) -> None:
+        """Map an article to relevant AI topics based on content analysis and source mapping"""
+        logger.info(f"🧠 Mapping article {article_id} to AI topics based on source '{source}'")
+        
+        conn = self.get_db_connection()
+        cursor = conn.cursor()
+        
+        try:
+            # First, get all available AI topics
+            cursor.execute("SELECT id, topic_id, display_name, category, target_roles FROM ai_topics")
+            all_topics = cursor.fetchall()
+            
+            if not all_topics:
+                logger.warning("⚠️ No AI topics found in database - skipping topic mapping")
+                conn.close()
+                return
+            
+            # Source-based topic mapping (high confidence)
+            source_topic_mapping = {
+                # Source name patterns mapped to topic IDs
+                "openai": ["foundation_models", "nlp_llm", "generative_ai"],
+                "anthropic": ["ai_ethics", "foundation_models", "nlp_llm"],
+                "google": ["foundation_models", "computer_vision", "deep_learning"],
+                "deepmind": ["reinforcement_learning", "computer_vision", "foundation_models"],
+                "hugging face": ["nlp_llm", "foundation_models", "ai_tools"],
+                "nvidia": ["computer_vision", "deep_learning", "robotics"],
+                "tesla": ["autonomous_systems", "robotics", "computer_vision"],
+                "microsoft": ["cloud_computing", "nlp_llm", "applied_ai"],
+                "amazon": ["cloud_computing", "applied_ai", "nlp_llm"],
+                "meta": ["computer_vision", "nlp_llm", "foundation_models"],
+                "pytorch": ["deep_learning", "tools_frameworks", "ml_foundations"],
+                "tensorflow": ["deep_learning", "tools_frameworks", "ml_foundations"],
+                "kaggle": ["data_science", "project_ideas", "ml_foundations"],
+                "arxiv": ["research_papers", "ml_foundations", "deep_learning"],
+                "towards data science": ["educational_content", "data_science", "ml_foundations"],
+                "ai news": ["industry_news", "applied_ai", "ml_foundations"],
+                "venture beat": ["industry_news", "investment_funding", "applied_ai"],
+                "techcrunch": ["industry_news", "investment_funding", "startup_news"],
+                "wired": ["ai_in_everyday_life", "industry_news", "ai_ethics"],
+                "mit technology review": ["research_papers", "ai_ethics", "foundation_models"],
+                "nature": ["research_papers", "ml_foundations", "ai_ethics"],
+                "ieee": ["research_papers", "technical_standards", "ml_foundations"],
+                "acm": ["research_papers", "technical_standards", "computer_science"],
+                "podcast": ["educational_content", "industry_news", "career_trends"],
+                "youtube": ["educational_content", "tutorials", "project_ideas"],
+                "coursera": ["educational_content", "career_trends", "tools_frameworks"],
+                "udacity": ["educational_content", "career_trends", "project_ideas"]
+            }
+            
+            # Content-based keyword mapping (medium confidence)
+            content_text = f"{title} {content}".lower()
+            
+            # Find matching topics based on source
+            matched_topics = []
+            source_lower = source.lower()
+            
+            for source_pattern, topic_ids in source_topic_mapping.items():
+                if source_pattern in source_lower:
+                    for topic_id in topic_ids:
+                        # Find the topic in our database
+                        matching_topic = next((t for t in all_topics if t[1] == topic_id), None)
+                        if matching_topic:
+                            matched_topics.append({
+                                "topic_db_id": matching_topic[0],
+                                "topic_id": matching_topic[1],
+                                "relevance_score": 0.9,  # High confidence for source-based mapping
+                                "source": "source_mapping"
+                            })
+            
+            # Content-based keyword analysis for additional topics
+            keyword_topic_mapping = {
+                "machine learning": ["ml_foundations", "educational_content"],
+                "deep learning": ["deep_learning", "ml_foundations"],
+                "neural network": ["deep_learning", "ml_foundations"],
+                "artificial intelligence": ["ml_foundations", "ai_explained"],
+                "computer vision": ["computer_vision", "deep_learning"],
+                "natural language": ["nlp_llm", "foundation_models"],
+                "robotics": ["robotics", "autonomous_systems"],
+                "autonomous": ["autonomous_systems", "robotics"],
+                "ethics": ["ai_ethics", "basic_ethics"],
+                "bias": ["ai_ethics", "basic_ethics"],
+                "fairness": ["ai_ethics", "basic_ethics"],
+                "generative": ["generative_ai", "foundation_models"],
+                "gpt": ["nlp_llm", "foundation_models"],
+                "claude": ["nlp_llm", "ai_ethics"],
+                "chatbot": ["nlp_llm", "ai_in_everyday_life"],
+                "investment": ["investment_funding", "industry_news"],
+                "funding": ["investment_funding", "startup_news"],
+                "startup": ["startup_news", "industry_news"],
+                "regulation": ["ai_policy", "ai_ethics"],
+                "policy": ["ai_policy", "government_initiatives"],
+                "tutorial": ["educational_content", "tools_frameworks"],
+                "course": ["educational_content", "career_trends"],
+                "project": ["project_ideas", "applied_ai"],
+                "github": ["project_ideas", "tools_frameworks"],
+                "research": ["research_papers", "ml_foundations"],
+                "paper": ["research_papers", "ml_foundations"],
+                "conference": ["events", "research_papers"],
+                "summit": ["events", "industry_news"]
+            }
+            
+            # Add content-based matches
+            for keyword, topic_ids in keyword_topic_mapping.items():
+                if keyword in content_text:
+                    for topic_id in topic_ids:
+                        # Find the topic in our database
+                        matching_topic = next((t for t in all_topics if t[1] == topic_id), None)
+                        if matching_topic:
+                            # Check if we already have this topic from source mapping
+                            existing = next((t for t in matched_topics if t["topic_db_id"] == matching_topic[0]), None)
+                            if not existing:
+                                matched_topics.append({
+                                    "topic_db_id": matching_topic[0],
+                                    "topic_id": matching_topic[1],
+                                    "relevance_score": 0.7,  # Medium confidence for content-based mapping
+                                    "source": "content_analysis"
+                                })
+                            else:
+                                # Boost relevance if both source and content match
+                                existing["relevance_score"] = min(1.0, existing["relevance_score"] + 0.1)
+                                existing["source"] = "source_and_content"
+            
+            # If no topics matched, assign general AI topics based on user level
+            if not matched_topics:
+                general_topics = ["ml_foundations", "ai_explained", "industry_news"]
+                for topic_id in general_topics:
+                    matching_topic = next((t for t in all_topics if t[1] == topic_id), None)
+                    if matching_topic:
+                        matched_topics.append({
+                            "topic_db_id": matching_topic[0],
+                            "topic_id": matching_topic[1],
+                            "relevance_score": 0.5,  # Low confidence for fallback mapping
+                            "source": "fallback"
+                        })
+            
+            # Insert mappings into article_topics junction table
+            for topic_match in matched_topics:
+                try:
+                    cursor.execute("""
+                        INSERT OR IGNORE INTO article_topics (article_id, topic_id, relevance_score)
+                        VALUES (?, ?, ?)
+                    """, (article_id, topic_match["topic_db_id"], topic_match["relevance_score"]))
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to insert topic mapping for article {article_id}, topic {topic_match['topic_id']}: {e}")
+            
+            conn.commit()
+            conn.close()
+            
+            logger.info(f"✅ Mapped article {article_id} to {len(matched_topics)} topics: {[t['topic_id'] for t in matched_topics]}")
+            
+        except Exception as e:
+            logger.error(f"❌ Error mapping article to topics: {e}")
+            conn.close()
     
     async def handle_personalized_digest(self, headers: Dict, params: Dict = None) -> Dict[str, Any]:
         """Get personalized digest - requires authentication"""
@@ -3739,6 +4394,128 @@ Vidyagam • Connecting AI Innovation
                 "debug_info": {"traceback": traceback.format_exc()}
             }
 
+    async def handle_bulk_map_articles_to_topics(self, params: Dict = None) -> Dict[str, Any]:
+        """Bulk map existing articles to AI topics using foreign key relationships"""
+        try:
+            logger.info("🧠 Starting bulk article-to-topic mapping process...")
+            
+            if params is None:
+                params = {}
+            
+            # Get optional parameters
+            limit = params.get('limit', 50)  # Default to mapping 50 articles at a time
+            offset = params.get('offset', 0)  # For pagination
+            
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+            
+            # Get articles that don't have topic mappings yet
+            cursor.execute("""
+                SELECT a.id, a.source, a.title, COALESCE(a.content, a.summary, '') as content
+                FROM articles a
+                LEFT JOIN article_topics at ON a.id = at.article_id
+                WHERE at.article_id IS NULL
+                ORDER BY a.significance_score DESC, a.published_date DESC
+                LIMIT ? OFFSET ?
+            """, (limit, offset))
+            
+            unmapped_articles = cursor.fetchall()
+            
+            if not unmapped_articles:
+                conn.close()
+                logger.info("✅ No unmapped articles found - all articles already have topic assignments")
+                return {
+                    "success": True,
+                    "message": "No unmapped articles found",
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "statistics": {
+                        "articles_processed": 0,
+                        "topics_assigned": 0,
+                        "all_articles_mapped": True
+                    }
+                }
+            
+            logger.info(f"📊 Found {len(unmapped_articles)} unmapped articles (limit: {limit}, offset: {offset})")
+            
+            # Process each article and map to topics
+            total_topics_assigned = 0
+            processed_articles = 0
+            
+            for article in unmapped_articles:
+                article_id, source, title, content = article
+                logger.info(f"🧠 Mapping article {article_id}: '{title[:50]}...'")
+                
+                # Use the mapping method we created
+                self.map_article_to_topics(article_id, source, title, content)
+                processed_articles += 1
+                
+                # Count topics assigned to this article
+                cursor.execute("SELECT COUNT(*) FROM article_topics WHERE article_id = ?", (article_id,))
+                topics_for_article = cursor.fetchone()[0]
+                total_topics_assigned += topics_for_article
+            
+            # Get summary statistics
+            cursor.execute("SELECT COUNT(*) FROM articles")
+            total_articles = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(DISTINCT article_id) FROM article_topics")
+            mapped_articles = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM article_topics")
+            total_mappings = cursor.fetchone()[0]
+            
+            cursor.execute("""
+                SELECT t.topic_id, t.display_name, COUNT(at.article_id) as article_count
+                FROM ai_topics t
+                LEFT JOIN article_topics at ON t.id = at.topic_id
+                GROUP BY t.id, t.topic_id, t.display_name
+                ORDER BY article_count DESC
+                LIMIT 10
+            """)
+            topic_distribution = cursor.fetchall()
+            
+            conn.close()
+            
+            logger.info(f"✅ Bulk mapping completed: {processed_articles} articles processed, {total_topics_assigned} topic assignments made")
+            
+            return {
+                "success": True,
+                "message": f"Successfully mapped {processed_articles} articles to topics",
+                "timestamp": datetime.utcnow().isoformat(),
+                "parameters": {
+                    "limit": limit,
+                    "offset": offset
+                },
+                "statistics": {
+                    "articles_processed": processed_articles,
+                    "topics_assigned": total_topics_assigned,
+                    "total_articles": total_articles,
+                    "mapped_articles": mapped_articles,
+                    "unmapped_articles": total_articles - mapped_articles,
+                    "total_mappings": total_mappings,
+                    "avg_topics_per_article": round(total_mappings / max(mapped_articles, 1), 2)
+                },
+                "topic_distribution": [
+                    {"topic_id": row[0], "name": row[1], "article_count": row[2]}
+                    for row in topic_distribution
+                ],
+                "next_steps": {
+                    "continue_mapping": total_articles > mapped_articles,
+                    "next_offset": offset + limit if len(unmapped_articles) == limit else None,
+                    "recommendation": "Run again with higher offset to map remaining articles" if len(unmapped_articles) == limit else "All articles have been mapped"
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Bulk topic mapping failed: {str(e)}")
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            return {
+                "success": False,
+                "error": f"Bulk topic mapping failed: {str(e)}",
+                "status": 500,
+                "debug_info": {"traceback": traceback.format_exc()}
+            }
+
     async def handle_public_init_sources(self) -> Dict[str, Any]:
         """Public endpoint to initialize comprehensive AI sources (no auth required)"""
         try:
@@ -3847,6 +4624,9 @@ Vidyagam • Connecting AI Innovation
             
             elif admin_endpoint == "init-ai-sources":
                 return await self.handle_init_ai_sources_table(params)
+            
+            elif admin_endpoint == "bulk-map-topics":
+                return await self.handle_bulk_map_articles_to_topics(params)
             
             else:
                 logger.warning(f"❌ Unknown admin endpoint: {admin_endpoint}")
@@ -4055,7 +4835,7 @@ async def root():
     logger.info("🏠 Root endpoint accessed")
     return {
         "service": "AI News Scraper",
-        "version": "2.1.0",
+        "version": "2.4.0",
         "platform": "Railway",
         "architecture": "single_function_router",
         "scalability": "unlimited_endpoints",
