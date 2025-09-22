@@ -507,28 +507,6 @@ class AINewsRouter:
                         elif isinstance(default_value, bool):
                             cursor.execute(f"UPDATE user_preferences SET {column_name} = {1 if default_value else 0} WHERE {column_name} IS NULL")
             
-            # =================================================================
-            # INDEXES FOR PERFORMANCE
-            # =================================================================
-            
-            # Index on articles for better query performance
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_articles_published_date ON articles(published_date)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_articles_significance ON articles(significance_score)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_articles_source ON articles(source)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_articles_content_type_id ON articles(content_type_id)")
-            
-            # Indexes on AI topics and article_topics junction table
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_topics_topic_id ON ai_topics(topic_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_topics_category ON ai_topics(category)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_article_topics_article_id ON article_topics(article_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_article_topics_topic_id ON article_topics(topic_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_article_topics_relevance ON article_topics(relevance_score)")
-            
-            # Index on users for authentication
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
-            
-            # Index on OTPs for cleanup and verification
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_email_otps_expires ON email_otps(expires_at)")
             
             # =================================================================
             # AI SOURCES TABLE - Database-driven source management
@@ -576,6 +554,179 @@ class AINewsRouter:
             
             # Sync content types from ai_sources to articles table
             self.sync_content_types_to_articles(cursor)
+            
+            # =================================================================
+            # INDEXES FOR PERFORMANCE (Created AFTER table population)
+            # =================================================================
+            
+            logger.info("🔧 Creating database indexes for performance optimization...")
+            
+            # Index on articles for better query performance
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_articles_published_date ON articles(published_date)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_articles_significance ON articles(significance_score)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_articles_source ON articles(source)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_articles_content_type_id ON articles(content_type_id)")
+            
+            # Indexes on AI topics and article_topics junction table
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_topics_topic_id ON ai_topics(topic_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_topics_category ON ai_topics(category)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_article_topics_article_id ON article_topics(article_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_article_topics_topic_id ON article_topics(topic_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_article_topics_relevance ON article_topics(relevance_score)")
+            
+            # Index on users for authentication
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
+            
+            # Index on OTPs for cleanup and verification
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_email_otps_expires ON email_otps(expires_at)")
+            
+            logger.info("✅ Database indexes created successfully")
+            
+            # =================================================================
+            # DATABASE VIEWS FOR OPTIMIZED LLM-SUMMARIZED CONTENT DELIVERY
+            # =================================================================
+            
+            logger.info("🎯 Creating optimized database views for LLM content delivery...")
+            
+            # View 1: Enhanced Articles with Content Types and Topics (Main digest view)
+            cursor.execute("""
+                CREATE VIEW IF NOT EXISTS v_enhanced_articles AS
+                SELECT 
+                    a.id,
+                    a.title,
+                    COALESCE(a.content, a.summary) as content,
+                    a.summary,
+                    a.source,
+                    a.published_date,
+                    a.url,
+                    a.significance_score,
+                    a.thumbnail_url,
+                    a.audio_url,
+                    a.video_url,
+                    a.duration,
+                    COALESCE(a.read_time, a.duration, '3 min') as read_time,
+                    a.processing_status,
+                    a.content_hash,
+                    -- Content type information
+                    COALESCE(ct.name, 'blogs') as content_type,
+                    ct.display_name as content_type_display,
+                    ct.frontend_section,
+                    ct.icon as content_type_icon,
+                    -- Topic information (aggregated)
+                    GROUP_CONCAT(DISTINCT t.topic_id) as topic_ids,
+                    GROUP_CONCAT(DISTINCT t.display_name) as topic_names,
+                    GROUP_CONCAT(DISTINCT t.category) as topic_categories,
+                    GROUP_CONCAT(DISTINCT at.relevance_score) as topic_relevance_scores,
+                    COUNT(DISTINCT t.id) as topic_count,
+                    AVG(at.relevance_score) as avg_relevance_score,
+                    -- Computed fields for frontend
+                    'medium' as impact,
+                    CASE 
+                        WHEN a.significance_score >= 8.0 THEN 'high'
+                        WHEN a.significance_score >= 6.0 THEN 'medium'
+                        ELSE 'low'
+                    END as impact_level
+                FROM articles a
+                LEFT JOIN content_types ct ON a.content_type_id = ct.id
+                LEFT JOIN article_topics at ON a.id = at.article_id
+                LEFT JOIN ai_topics t ON at.topic_id = t.id
+                WHERE a.published_date IS NOT NULL AND a.published_date != ''
+                GROUP BY a.id, a.title, a.content, a.summary, a.source, a.published_date, 
+                         a.url, a.significance_score, a.thumbnail_url, a.audio_url, a.video_url,
+                         a.duration, a.read_time, a.processing_status, a.content_hash,
+                         ct.name, ct.display_name, ct.frontend_section, ct.icon
+            """)
+            
+            # View 2: Top Stories with Enhanced Metadata (Digest top stories)
+            cursor.execute("""
+                CREATE VIEW IF NOT EXISTS v_top_stories AS
+                SELECT 
+                    ea.*,
+                    -- Additional computed fields for top stories
+                    RANK() OVER (ORDER BY ea.significance_score DESC, ea.published_date DESC) as story_rank,
+                    CASE 
+                        WHEN ea.topic_count > 3 THEN 'multi-topic'
+                        WHEN ea.topic_count > 1 THEN 'cross-topic'
+                        WHEN ea.topic_count = 1 THEN 'focused'
+                        ELSE 'general'
+                    END as topic_classification
+                FROM v_enhanced_articles ea
+                WHERE ea.significance_score >= 5.0
+                ORDER BY ea.significance_score DESC, ea.published_date DESC
+            """)
+            
+            # View 3: Content by Type (for ContentTabs optimization)
+            cursor.execute("""
+                CREATE VIEW IF NOT EXISTS v_content_by_type AS
+                SELECT 
+                    ct.name as content_type,
+                    ct.display_name,
+                    ct.frontend_section,
+                    COUNT(a.id) as article_count,
+                    AVG(a.significance_score) as avg_significance,
+                    MAX(a.published_date) as latest_article_date,
+                    -- Sample articles for each content type
+                    GROUP_CONCAT(
+                        DISTINCT a.title || '|' || a.url || '|' || a.significance_score, 
+                        ';;;'
+                    ) as sample_articles
+                FROM content_types ct
+                LEFT JOIN articles a ON ct.id = a.content_type_id
+                WHERE a.published_date IS NOT NULL AND a.published_date != ''
+                GROUP BY ct.id, ct.name, ct.display_name, ct.frontend_section
+                ORDER BY article_count DESC
+            """)
+            
+            # View 4: Personalized Content for User Preferences
+            cursor.execute("""
+                CREATE VIEW IF NOT EXISTS v_personalized_articles AS
+                SELECT 
+                    ea.*,
+                    -- User preference matching (to be filtered by application logic)
+                    CASE 
+                        WHEN ea.topic_count > 0 THEN 'topic_matched'
+                        ELSE 'general_content'
+                    END as personalization_type,
+                    -- Content freshness score
+                    CASE 
+                        WHEN DATE(ea.published_date) = DATE('now') THEN 3.0
+                        WHEN DATE(ea.published_date) >= DATE('now', '-1 day') THEN 2.0
+                        WHEN DATE(ea.published_date) >= DATE('now', '-7 days') THEN 1.0
+                        ELSE 0.5
+                    END as freshness_score,
+                    -- Combined scoring for personalization
+                    (ea.significance_score * 0.7 + 
+                     COALESCE(ea.avg_relevance_score, 0.5) * 0.3) as personalization_score
+                FROM v_enhanced_articles ea
+                ORDER BY personalization_score DESC, ea.published_date DESC
+            """)
+            
+            # View 5: Topic Distribution Summary (for admin analytics)
+            cursor.execute("""
+                CREATE VIEW IF NOT EXISTS v_topic_analytics AS
+                SELECT 
+                    t.topic_id,
+                    t.display_name,
+                    t.category,
+                    t.target_roles,
+                    COUNT(DISTINCT at.article_id) as article_count,
+                    AVG(at.relevance_score) as avg_relevance,
+                    COUNT(DISTINCT a.source) as unique_sources,
+                    MAX(a.published_date) as latest_article_date,
+                    AVG(a.significance_score) as avg_article_significance,
+                    -- Content type distribution for this topic
+                    GROUP_CONCAT(
+                        DISTINCT ct.name || ':' || COUNT(a.id) OVER (PARTITION BY t.id, ct.id)
+                    ) as content_type_distribution
+                FROM ai_topics t
+                LEFT JOIN article_topics at ON t.id = at.topic_id
+                LEFT JOIN articles a ON at.article_id = a.id
+                LEFT JOIN content_types ct ON a.content_type_id = ct.id
+                GROUP BY t.id, t.topic_id, t.display_name, t.category, t.target_roles
+                ORDER BY article_count DESC, avg_relevance DESC
+            """)
+            
+            logger.info("✅ Database views created successfully for optimized content delivery")
             
             # Commit all changes
             conn.commit()
@@ -1106,44 +1257,36 @@ class AINewsRouter:
             conn = self.get_db_connection()
             cursor = conn.cursor()
             
-            # Get recent content from unified articles table with proper foreign key JOINs including topics
+            # Get recent content using optimized view for faster LLM-summarized content delivery
             cursor.execute("""
                 SELECT 
-                    a.title,
-                    COALESCE(a.content, a.summary) as content,
-                    a.summary,
-                    a.source,
-                    a.published_date,
-                    'medium' as impact,
-                    COALESCE(ct.name, 'blogs') as type,
-                    a.url,
-                    COALESCE(a.read_time, a.duration, '3 min') as read_time,
-                    a.significance_score,
-                    a.thumbnail_url,
-                    a.audio_url,
-                    a.duration,
-                    ct.display_name,
-                    ct.frontend_section,
-                    GROUP_CONCAT(DISTINCT t.topic_id) as topic_ids,
-                    GROUP_CONCAT(DISTINCT t.display_name) as topic_names,
-                    GROUP_CONCAT(DISTINCT t.category) as topic_categories,
-                    GROUP_CONCAT(DISTINCT at.relevance_score) as topic_relevance_scores
-                FROM articles a
-                LEFT JOIN content_types ct ON a.content_type_id = ct.id
-                LEFT JOIN ai_sources ai ON a.source = ai.name
-                LEFT JOIN article_topics at ON a.id = at.article_id
-                LEFT JOIN ai_topics t ON at.topic_id = t.id
-                WHERE a.published_date IS NOT NULL AND a.published_date != ''
-                GROUP BY a.id, a.title, a.content, a.summary, a.source, a.published_date, a.url, 
-                         a.read_time, a.duration, a.significance_score, a.thumbnail_url, a.audio_url,
-                         ct.name, ct.display_name, ct.frontend_section
-                ORDER BY a.significance_score DESC, a.published_date DESC
+                    title,
+                    content,
+                    summary,
+                    source,
+                    published_date,
+                    impact,
+                    content_type as type,
+                    url,
+                    read_time,
+                    significance_score,
+                    thumbnail_url,
+                    audio_url,
+                    duration,
+                    content_type_display,
+                    frontend_section,
+                    topic_ids,
+                    topic_names,
+                    topic_categories,
+                    topic_relevance_scores
+                FROM v_enhanced_articles
+                ORDER BY significance_score DESC, published_date DESC
                 LIMIT 50
             """)
             
             articles = []
             for row in cursor.fetchall():
-                # Parse topic information from GROUP_CONCAT results
+                # Parse topic information from GROUP_CONCAT results from the view
                 topic_ids = row[15].split(',') if row[15] else []
                 topic_names = row[16].split(',') if row[16] else []
                 topic_categories = row[17].split(',') if row[17] else []
@@ -1177,8 +1320,9 @@ class AINewsRouter:
                     "duration": row[12],
                     "content_type_display": row[13],
                     "frontend_section": row[14],
-                    "topics": topics,  # New: Article topic associations
-                    "topic_count": len(topics)  # New: Number of topics associated
+                    "topics": topics,  # Enhanced: Article topic associations from view
+                    "topic_count": len(topics),  # Enhanced: Number of topics associated
+                    "from_view": True  # Flag to indicate this came from optimized view
                 })
             
             conn.close()
