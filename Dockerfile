@@ -34,6 +34,7 @@ COPY --from=builder /root/.local /home/appuser/.local
 
 # Copy application code and requirements (Railway needs this in runtime)
 COPY api/ /app/api/
+COPY comprehensive_ai_sources.py .
 COPY health_check.py .
 COPY requirements.txt .
 COPY .env.production .env
