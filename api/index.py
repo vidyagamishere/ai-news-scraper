@@ -4898,10 +4898,10 @@ Vidyagam • Connecting AI Innovation
         try:
             logger.info("📚 Public research articles addition requested")
             
-            # Comprehensive AI topic sources based on research
+            # Comprehensive AI topic sources based on research (using correct topic IDs from database)
             comprehensive_topic_sources = {
-                # Machine Learning Foundations
-                'ml_foundations': [
+                # Machine Learning (topic_id: machine-learning)
+                'machine-learning': [
                     {
                         'title': 'Google DeepMind Research Publications',
                         'url': 'https://deepmind.google/research/publications/',
@@ -4931,8 +4931,8 @@ Vidyagam • Connecting AI Innovation
                     }
                 ],
                 
-                # Computer Vision
-                'computer_vision': [
+                # Computer Vision (using computer-vision topic)
+                'computer-vision': [
                     {
                         'title': 'CVPR 2024 Open Access Repository',
                         'url': 'https://openaccess.thecvf.com/CVPR2024',
@@ -4962,8 +4962,8 @@ Vidyagam • Connecting AI Innovation
                     }
                 ],
                 
-                # Natural Language Processing
-                'nlp_llm': [
+                # Natural Language Processing (using natural-language-processing topic)
+                'natural-language-processing': [
                     {
                         'title': 'EMNLP 2024 Conference Proceedings',
                         'url': 'https://aclanthology.org/events/emnlp-2024/',
@@ -4993,8 +4993,8 @@ Vidyagam • Connecting AI Innovation
                     }
                 ],
                 
-                # Robotics & Automation
-                'robotics': [
+                # Robotics & Automation (using robotics-automation topic)
+                'robotics-automation': [
                     {
                         'title': 'IEEE ICRA 2025 Conference',
                         'url': 'https://2025.ieee-icra.org/',
@@ -5024,8 +5024,8 @@ Vidyagam • Connecting AI Innovation
                     }
                 ],
                 
-                # Quantum Computing & AI
-                'quantum_ai': [
+                # Quantum Computing & AI (using quantum-computing topic)
+                'quantum-computing': [
                     {
                         'title': 'Google Quantum AI Research',
                         'url': 'https://quantumai.google/research',
@@ -5055,8 +5055,8 @@ Vidyagam • Connecting AI Innovation
                     }
                 ],
                 
-                # AI Ethics & Governance
-                'ai_ethics': [
+                # AI Ethics & Governance (using ai-ethics topic)
+                'ai-ethics': [
                     {
                         'title': 'EU AI Act Implementation 2024',
                         'url': 'https://digital-strategy.ec.europa.eu/en/policies/regulatory-framework-ai',
@@ -5139,15 +5139,16 @@ Vidyagam • Connecting AI Innovation
                         
                         article_id = cursor.lastrowid
                         
-                        # Map to topic if possible
-                        cursor.execute("SELECT id FROM ai_topics WHERE id = ?", (topic_id,))
+                        # Map to topic if possible (using topic_id field, not id)
+                        cursor.execute("SELECT id FROM ai_topics WHERE topic_id = ?", (topic_id,))
                         topic_exists = cursor.fetchone()
                         
                         if topic_exists:
+                            topic_db_id = topic_exists[0]  # Get the actual database ID
                             cursor.execute("""
                                 INSERT OR IGNORE INTO article_topics (article_id, topic_id, relevance_score)
                                 VALUES (?, ?, ?)
-                            """, (article_id, topic_id, source['significance_score'] / 10.0))
+                            """, (article_id, topic_db_id, source['significance_score'] / 10.0))
                         
                         logger.info(f"✅ Added: {source['title']}")
                         total_added += 1
