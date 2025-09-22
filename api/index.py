@@ -1153,6 +1153,9 @@ class AINewsRouter:
             elif endpoint == "add-research-articles":
                 logger.info("📚 Routing to public research articles handler")
                 return await self.handle_public_add_research_articles()
+            elif endpoint == "remap-articles":
+                logger.info("🔄 Routing to article remapping handler")
+                return await self.handle_remap_articles()
             elif endpoint == "test-neon":
                 logger.info("🧪 Routing to test-neon handler")
                 return await self.handle_test_neon()
@@ -2883,36 +2886,36 @@ class AINewsRouter:
                 conn.close()
                 return
             
-            # Source-based topic mapping (high confidence)
+            # Source-based topic mapping (high confidence) - Updated to match database topic IDs
             source_topic_mapping = {
-                # Source name patterns mapped to topic IDs
-                "openai": ["foundation_models", "nlp_llm", "generative_ai"],
-                "anthropic": ["ai_ethics", "foundation_models", "nlp_llm"],
-                "google": ["foundation_models", "computer_vision", "deep_learning"],
-                "deepmind": ["reinforcement_learning", "computer_vision", "foundation_models"],
-                "hugging face": ["nlp_llm", "foundation_models", "ai_tools"],
-                "nvidia": ["computer_vision", "deep_learning", "robotics"],
-                "tesla": ["autonomous_systems", "robotics", "computer_vision"],
-                "microsoft": ["cloud_computing", "nlp_llm", "applied_ai"],
-                "amazon": ["cloud_computing", "applied_ai", "nlp_llm"],
-                "meta": ["computer_vision", "nlp_llm", "foundation_models"],
-                "pytorch": ["deep_learning", "tools_frameworks", "ml_foundations"],
-                "tensorflow": ["deep_learning", "tools_frameworks", "ml_foundations"],
-                "kaggle": ["data_science", "project_ideas", "ml_foundations"],
-                "arxiv": ["research_papers", "ml_foundations", "deep_learning"],
-                "towards data science": ["educational_content", "data_science", "ml_foundations"],
-                "ai news": ["industry_news", "applied_ai", "ml_foundations"],
-                "venture beat": ["industry_news", "investment_funding", "applied_ai"],
-                "techcrunch": ["industry_news", "investment_funding", "startup_news"],
-                "wired": ["ai_in_everyday_life", "industry_news", "ai_ethics"],
-                "mit technology review": ["research_papers", "ai_ethics", "foundation_models"],
-                "nature": ["research_papers", "ml_foundations", "ai_ethics"],
-                "ieee": ["research_papers", "technical_standards", "ml_foundations"],
-                "acm": ["research_papers", "technical_standards", "computer_science"],
-                "podcast": ["educational_content", "industry_news", "career_trends"],
-                "youtube": ["educational_content", "tutorials", "project_ideas"],
-                "coursera": ["educational_content", "career_trends", "tools_frameworks"],
-                "udacity": ["educational_content", "career_trends", "project_ideas"]
+                # Source name patterns mapped to topic IDs (using actual database IDs)
+                "openai": ["machine-learning", "deep-learning", "ai-research"],
+                "anthropic": ["ai-ethics-and-safety", "machine-learning", "deep-learning"],
+                "google": ["machine-learning", "deep-learning", "ai-research"],
+                "deepmind": ["machine-learning", "deep-learning", "ai-research"],
+                "hugging face": ["machine-learning", "tools-and-frameworks", "deep-learning"],
+                "nvidia": ["deep-learning", "robotics", "machine-learning"],
+                "tesla": ["robotics", "applied-ai", "industry-news"],
+                "microsoft": ["cloud-computing", "applied-ai", "machine-learning"],
+                "amazon": ["cloud-computing", "applied-ai", "machine-learning"],
+                "meta": ["machine-learning", "deep-learning", "ai-research"],
+                "pytorch": ["deep-learning", "tools-and-frameworks", "machine-learning"],
+                "tensorflow": ["deep-learning", "tools-and-frameworks", "machine-learning"],
+                "kaggle": ["data-science", "project-ideas", "machine-learning"],
+                "arxiv": ["ai-research", "machine-learning", "deep-learning"],
+                "towards data science": ["educational-content", "data-science", "machine-learning"],
+                "ai news": ["industry-news", "applied-ai", "machine-learning"],
+                "venture beat": ["industry-news", "investment-and-funding", "applied-ai"],
+                "techcrunch": ["industry-news", "investment-and-funding", "applied-ai"],
+                "wired": ["ai-in-everyday-life", "industry-news", "ai-ethics-and-safety"],
+                "mit technology review": ["ai-research", "ai-ethics-and-safety", "machine-learning"],
+                "nature": ["ai-research", "machine-learning", "ai-ethics-and-safety"],
+                "ieee": ["ai-research", "machine-learning", "robotics"],
+                "acm": ["ai-research", "machine-learning", "tools-and-frameworks"],
+                "podcast": ["educational-content", "industry-news", "career-trends"],
+                "youtube": ["educational-content", "project-ideas", "fun-and-interesting-ai"],
+                "coursera": ["educational-content", "career-trends", "tools-and-frameworks"],
+                "udacity": ["educational-content", "career-trends", "project-ideas"]
             }
             
             # Content-based keyword mapping (medium confidence)
@@ -2990,7 +2993,7 @@ class AINewsRouter:
             
             # If no topics matched, assign general AI topics based on user level
             if not matched_topics:
-                general_topics = ["ml_foundations", "ai_explained", "industry_news"]
+                general_topics = ["machine-learning", "ai-explained", "industry-news"]
                 for topic_id in general_topics:
                     matching_topic = next((t for t in all_topics if t[1] == topic_id), None)
                     if matching_topic:
@@ -5113,6 +5116,12 @@ Vidyagam • Connecting AI Innovation
                         
                         if existing:
                             logger.info(f"⚠️ Skipping duplicate URL: {source['url']}")
+                            debug_info.append({
+                                'action': 'skipped',
+                                'reason': 'duplicate_url',
+                                'url': source['url'],
+                                'title': source['title']
+                            })
                             total_skipped += 1
                             continue
                         
@@ -5154,6 +5163,16 @@ Vidyagam • Connecting AI Innovation
                                 VALUES (?, ?, ?)
                             """, (article_id, topic_db_id, source['significance_score'] / 10.0))
                             logger.info(f"🔗 Mapped article {article_id} to topic {topic_db_id}")
+                            debug_info.append({
+                                'action': 'added',
+                                'title': source['title'],
+                                'url': source['url'],
+                                'topic_searched': topic_id,
+                                'topic_found': True,
+                                'topic_name': topic_name,
+                                'article_id': article_id,
+                                'mapped_to_topic_id': topic_db_id
+                            })
                         else:
                             logger.warning(f"❌ Topic not found: {topic_id}")
                             # List available topics for debugging
@@ -5161,9 +5180,13 @@ Vidyagam • Connecting AI Innovation
                             available_topics = cursor.fetchall()
                             logger.info(f"📋 Available topics: {available_topics}")
                             debug_info.append({
+                                'action': 'added_no_topic',
+                                'title': source['title'],
+                                'url': source['url'],
                                 'topic_searched': topic_id,
                                 'topic_found': False,
-                                'available_topics': available_topics
+                                'available_topics': available_topics,
+                                'article_id': article_id
                             })
                         
                         logger.info(f"✅ Added: {source['title']}")
@@ -5208,6 +5231,79 @@ Vidyagam • Connecting AI Innovation
                 "error": f"Research articles addition failed: {str(e)}",
                 "status": 500,
                 "debug_info": {"traceback": traceback.format_exc()}
+            }
+    
+    async def handle_remap_articles(self) -> Dict[str, Any]:
+        """Remap all existing articles to topics with corrected topic IDs"""
+        try:
+            logger.info("🔄 Starting article remapping with corrected topic IDs")
+            
+            conn = self.get_db_connection()
+            cursor = conn.cursor()
+            
+            # Clear existing mappings to start fresh
+            logger.info("🧹 Clearing existing article-topic mappings")
+            cursor.execute("DELETE FROM article_topics")
+            
+            # Get all articles
+            cursor.execute("SELECT id, source, title, content FROM articles")
+            all_articles = cursor.fetchall()
+            
+            logger.info(f"📊 Found {len(all_articles)} articles to remap")
+            
+            # Remap each article
+            mapped_count = 0
+            total_mappings = 0
+            
+            for article in all_articles:
+                article_id, source, title, content = article
+                logger.info(f"🧠 Processing article {article_id}: '{(title or 'No title')[:30]}...'")
+                
+                # Use our corrected mapping method
+                self.map_article_to_topics(article_id, source, title or "", content or "")
+                
+                # Count mappings for this article
+                cursor.execute("SELECT COUNT(*) FROM article_topics WHERE article_id = ?", (article_id,))
+                mappings_for_article = cursor.fetchone()[0]
+                
+                if mappings_for_article > 0:
+                    mapped_count += 1
+                    total_mappings += mappings_for_article
+                    logger.info(f"✅ Article {article_id} mapped to {mappings_for_article} topics")
+                else:
+                    logger.warning(f"⚠️ Article {article_id} not mapped to any topics")
+            
+            conn.commit()
+            conn.close()
+            
+            logger.info(f"🎯 Remapping complete: {mapped_count}/{len(all_articles)} articles mapped, {total_mappings} total mappings")
+            
+            return {
+                "success": True,
+                "message": "Article remapping completed successfully with corrected topic IDs",
+                "statistics": {
+                    "total_articles": len(all_articles),
+                    "articles_mapped": mapped_count,
+                    "total_topic_mappings": total_mappings,
+                    "unmapped_articles": len(all_articles) - mapped_count
+                },
+                "debug_info": {
+                    "timestamp": datetime.now().isoformat(),
+                    "handler": "handle_remap_articles",
+                    "mapping_method": "corrected_topic_ids",
+                    "cleared_existing_mappings": True
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error in article remapping: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "debug_info": {
+                    "timestamp": datetime.now().isoformat(),
+                    "handler": "handle_remap_articles"
+                }
             }
 
     async def handle_admin_endpoints(self, endpoint: str, headers: Dict, params: Dict = None) -> Dict[str, Any]:
