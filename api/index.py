@@ -3266,14 +3266,33 @@ class AINewsRouter:
                         "onboarding_completed": True
                     }
             else:
-                # New user - create with empty topics (should go through onboarding)
-                preferences = {
-                    "topics": [],  # Empty topics for new users to select during onboarding
-                    "newsletter_frequency": "weekly",
-                    "email_notifications": True,
-                    "content_types": ["blogs", "podcasts", "videos"],
-                    "onboarding_completed": False  # New users need onboarding
-                }
+                # New user - check if this is a conceptually "existing" user who should skip onboarding
+                known_existing_users = [
+                    "vijayanishere@gmail.com",
+                    "sathiyavijayanishere@gmail.com", 
+                    "vijayandevopshere@gmail.com"
+                ]
+                
+                user_email = token_data.get('email', '').lower()
+                if user_email in known_existing_users:
+                    # Known existing user missing from Railway database - skip onboarding
+                    logger.info(f"👤 Known existing user {user_email} detected - providing default topics to skip onboarding")
+                    preferences = {
+                        "topics": self.get_mandatory_topics(),  # Give default topics to skip onboarding
+                        "newsletter_frequency": "weekly",
+                        "email_notifications": True,
+                        "content_types": ["blogs", "podcasts", "videos"],
+                        "onboarding_completed": True  # Skip onboarding for known users
+                    }
+                else:
+                    # True new user - create with empty topics (should go through onboarding)
+                    preferences = {
+                        "topics": [],  # Empty topics for new users to select during onboarding
+                        "newsletter_frequency": "weekly",
+                        "email_notifications": True,
+                        "content_types": ["blogs", "podcasts", "videos"],
+                        "onboarding_completed": False  # New users need onboarding
+                    }
             
             # Add preferences to the insert/update
             if 'preferences' in existing_columns:
