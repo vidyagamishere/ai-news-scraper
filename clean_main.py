@@ -84,23 +84,55 @@ app.add_middleware(
 # Health endpoint
 @app.get("/health")
 async def health():
-    """Health check endpoint"""
+    """Health check endpoint with comprehensive table stats"""
     try:
         db = get_database_service()
         
-        # Test database connection
-        result = db.execute_query("SELECT COUNT(*) as count FROM ai_sources")
-        sources_count = result[0]['count'] if result else 0
+        # Check all tables that the backend uses
+        table_stats = {}
+        
+        # Check ai_sources table
+        try:
+            result = db.execute_query("SELECT COUNT(*) as count FROM ai_sources")
+            table_stats["ai_sources"] = result[0]['count'] if result else 0
+        except Exception as e:
+            table_stats["ai_sources"] = f"Error: {str(e)}"
+        
+        # Check articles table
+        try:
+            result = db.execute_query("SELECT COUNT(*) as count FROM articles")
+            table_stats["articles"] = result[0]['count'] if result else 0
+        except Exception as e:
+            table_stats["articles"] = f"Error: {str(e)}"
+        
+        # Check ai_topics table
+        try:
+            result = db.execute_query("SELECT COUNT(*) as count FROM ai_topics")
+            table_stats["ai_topics"] = result[0]['count'] if result else 0
+        except Exception as e:
+            table_stats["ai_topics"] = f"Error: {str(e)}"
+        
+        # Check article_topics table
+        try:
+            result = db.execute_query("SELECT COUNT(*) as count FROM article_topics")
+            table_stats["article_topics"] = result[0]['count'] if result else 0
+        except Exception as e:
+            table_stats["article_topics"] = f"Error: {str(e)}"
+        
+        # Check users table
+        try:
+            result = db.execute_query("SELECT COUNT(*) as count FROM users")
+            table_stats["users"] = result[0]['count'] if result else 0
+        except Exception as e:
+            table_stats["users"] = f"Error: {str(e)}"
         
         return {
             "status": "healthy",
             "version": "4.0.0-clean-postgresql",
             "database": "postgresql",
-            "timestamp": "2025-09-23T12:40:00Z",
-            "database_stats": {
-                "ai_sources": sources_count,
-                "connection_pool": "active"
-            }
+            "timestamp": "2025-09-23T16:45:00Z",
+            "database_stats": table_stats,
+            "connection_pool": "active"
         }
     except Exception as e:
         logger.error(f"❌ Health check failed: {str(e)}")
@@ -110,6 +142,73 @@ async def health():
                 "status": "unhealthy",
                 "error": str(e),
                 "database": "postgresql"
+            }
+        )
+
+# Database schema endpoint
+@app.get("/db-schema")
+async def get_database_schema():
+    """Get database schema and table information"""
+    try:
+        db = get_database_service()
+        
+        # Get all tables
+        tables_query = """
+            SELECT table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = 'public' 
+            ORDER BY table_name
+        """
+        tables_result = db.execute_query(tables_query)
+        tables = [row['table_name'] for row in tables_result]
+        
+        # Get table details for each table
+        table_details = {}
+        for table in tables:
+            try:
+                # Get column information
+                columns_query = f"""
+                    SELECT column_name, data_type, is_nullable, column_default
+                    FROM information_schema.columns 
+                    WHERE table_name = '{table}' AND table_schema = 'public'
+                    ORDER BY ordinal_position
+                """
+                columns = db.execute_query(columns_query)
+                
+                # Get row count
+                count_query = f"SELECT COUNT(*) as count FROM {table}"
+                count_result = db.execute_query(count_query)
+                row_count = count_result[0]['count'] if count_result else 0
+                
+                table_details[table] = {
+                    "columns": columns,
+                    "row_count": row_count
+                }
+            except Exception as e:
+                table_details[table] = {"error": str(e)}
+        
+        return {
+            "database": "postgresql",
+            "total_tables": len(tables),
+            "tables": tables,
+            "table_details": table_details,
+            "backend_usage": {
+                "ai_sources": "Used by /sources endpoint for content source configuration",
+                "articles": "Used by /digest endpoint for news content",
+                "ai_topics": "Not currently used in clean backend",
+                "article_topics": "Not currently used in clean backend", 
+                "users": "Not currently used in clean backend (auth endpoints missing)",
+                "daily_archives": "Not currently used in clean backend"
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Database schema endpoint failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                'error': 'Failed to get database schema',
+                'message': str(e)
             }
         )
 
