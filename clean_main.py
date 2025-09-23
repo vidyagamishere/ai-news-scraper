@@ -23,6 +23,53 @@ from pydantic import BaseModel, EmailStr
 from dotenv import load_dotenv
 from bs4 import BeautifulSoup
 
+# Import Pydantic models for authentication and responses
+try:
+    from app.models.schemas import (
+        UserResponse, UserPreferences, GoogleAuthRequest, 
+        OTPRequest, OTPVerifyRequest, TokenResponse
+    )
+except ImportError:
+    # Define minimal models inline if app.models.schemas is not available
+    class UserResponse(BaseModel):
+        id: str
+        email: str
+        name: Optional[str] = None
+        profile_image: Optional[str] = None
+        subscription_tier: str = "free"
+        preferences: Dict[str, Any] = {}
+        verified_email: bool = False
+        
+    class UserPreferences(BaseModel):
+        topics: Optional[List[str]] = []
+        user_roles: Optional[List[str]] = []
+        role_type: Optional[str] = None
+        experience_level: Optional[str] = None
+        content_types: Optional[List[str]] = []
+        newsletter_frequency: Optional[str] = "weekly"
+        email_notifications: Optional[bool] = True
+        breaking_news_alerts: Optional[bool] = False
+        newsletter_subscribed: Optional[bool] = True
+        onboarding_completed: Optional[bool] = False
+        
+    class GoogleAuthRequest(BaseModel):
+        credential: str
+        
+    class OTPRequest(BaseModel):
+        email: str
+        name: Optional[str] = None
+        auth_mode: Optional[str] = "signin"
+        
+    class OTPVerifyRequest(BaseModel):
+        email: str
+        otp: str
+        userData: Optional[Dict[str, Any]] = {}
+        
+    class TokenResponse(BaseModel):
+        access_token: str
+        token_type: str = "bearer"
+        user: UserResponse
+
 # Add current directory to Python path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -242,6 +289,28 @@ def get_current_user(authorization: Optional[str] = Header(None)) -> UserRespons
     
     return UserResponse(**user)
 
+def get_current_user_optional(authorization: Optional[str] = Header(None)) -> Optional[UserResponse]:
+    """Get current authenticated user from JWT token - optional for digest endpoint"""
+    try:
+        if not authorization or not authorization.startswith('Bearer '):
+            return None
+        
+        token = authorization.split(' ')[1]
+        auth_service = AuthService()
+        user_data = auth_service.verify_jwt_token(token)
+        
+        if not user_data:
+            return None
+        
+        # Get user from database
+        user = auth_service.get_user_by_email(user_data['email'])
+        if not user:
+            return None
+        
+        return UserResponse(**user)
+    except Exception:
+        return None
+
 def get_auth_service() -> AuthService:
     """Dependency to get AuthService instance"""
     return AuthService()
@@ -444,6 +513,30 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Root endpoint
+@app.get("/")
+async def root():
+    """Root endpoint with API information"""
+    return {
+        "message": "AI News Scraper API - Clean PostgreSQL Version",
+        "version": "4.0.0-clean-postgresql",
+        "database": "postgresql",
+        "status": "operational",
+        "endpoints": {
+            "health": "/health",
+            "sources": "/sources", 
+            "digest": "/digest",
+            "scrape": "/scrape",
+            "auth": {
+                "google": "/auth/google",
+                "send_otp": "/auth/send-otp", 
+                "verify_otp": "/auth/verify-otp",
+                "profile": "/auth/profile",
+                "preferences": "/auth/preferences"
+            }
+        }
+    }
 
 # Health endpoint
 @app.get("/health")
@@ -813,7 +906,7 @@ def get_general_articles(limit: int = 20) -> List[dict]:
 
 # Digest endpoint with personalization
 @app.get("/digest")
-async def get_digest(current_user: Optional[UserResponse] = Depends(get_current_user)):
+async def get_digest(current_user: Optional[UserResponse] = Depends(get_current_user_optional)):
     """Get news digest - personalized for authenticated users"""
     try:
         logger.info("📊 Digest requested")
@@ -865,7 +958,7 @@ async def get_digest(current_user: Optional[UserResponse] = Depends(get_current_
 
 # Manual scraping endpoint
 @app.post("/scrape")
-async def manual_scrape(current_user: Optional[UserResponse] = Depends(get_current_user)):
+async def manual_scrape(current_user: Optional[UserResponse] = Depends(get_current_user_optional)):
     """Manually trigger content scraping - admin function"""
     try:
         logger.info("🕷️ Manual scraping triggered")
