@@ -329,18 +329,81 @@ async def scrape_content_from_sources():
         logger.error(f"❌ Scraping failed: {str(e)}")
         return {"success": False, "error": str(e)}
 
+def ensure_postgresql_only():
+    """Rename SQLite files to ensure PostgreSQL is used exclusively"""
+    try:
+        import os
+        import shutil
+        from pathlib import Path
+        
+        # List of SQLite files to rename/disable
+        sqlite_files = [
+            '/app/ai_news.db',
+            '/app/ai_news_backup_20250922_235538.db',
+            './ai_news.db',
+            './ai_news_backup_20250922_235538.db',
+            'ai_news.db',
+            'ai_news_backup_20250922_235538.db'
+        ]
+        
+        for sqlite_file in sqlite_files:
+            if os.path.exists(sqlite_file):
+                backup_name = f"{sqlite_file}.disabled_{int(datetime.utcnow().timestamp())}"
+                try:
+                    shutil.move(sqlite_file, backup_name)
+                    logger.info(f"🗃️ Renamed SQLite file: {sqlite_file} → {backup_name}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not rename {sqlite_file}: {str(e)}")
+        
+        # Also check common SQLite file locations in Docker containers
+        docker_paths = ['/app/data/', '/app/', '/opt/app/', './']
+        for path in docker_paths:
+            try:
+                for file in Path(path).glob('*.db'):
+                    if file.name.startswith('ai_news'):
+                        backup_name = f"{file}.disabled_{int(datetime.utcnow().timestamp())}"
+                        try:
+                            file.rename(backup_name)
+                            logger.info(f"🗃️ Renamed Docker SQLite file: {file} → {backup_name}")
+                        except Exception as e:
+                            logger.warning(f"⚠️ Could not rename {file}: {str(e)}")
+            except Exception:
+                continue
+        
+        logger.info("✅ SQLite file cleanup completed - PostgreSQL will be used exclusively")
+        
+    except Exception as e:
+        logger.warning(f"⚠️ SQLite cleanup failed: {str(e)} - This is expected in some environments")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan events"""
     # Startup
     logger.info("🚀 Starting AI News Scraper API with clean PostgreSQL")
     
+    # First, ensure we're using PostgreSQL only by disabling SQLite files
+    ensure_postgresql_only()
+    
     try:
-        # Just test database connection - no migration
+        # Test PostgreSQL database connection
         db = get_database_service()
         logger.info("✅ PostgreSQL connection established")
+        
+        # Log database connection details (without sensitive info)
+        postgres_url = os.getenv('POSTGRES_URL', '')
+        if postgres_url:
+            # Extract host info without credentials
+            if '@' in postgres_url:
+                host_part = postgres_url.split('@')[1].split('/')[0]
+                logger.info(f"🐘 Connected to PostgreSQL host: {host_part}")
+            else:
+                logger.info("🐘 PostgreSQL connection configured")
+        else:
+            logger.warning("⚠️ No POSTGRES_URL environment variable found")
+            
     except Exception as e:
         logger.error(f"❌ Database connection failed: {str(e)}")
+        logger.error("🔍 Make sure POSTGRES_URL environment variable is set correctly")
         raise e
     
     yield
