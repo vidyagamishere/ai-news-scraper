@@ -53,7 +53,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="AI News Scraper API",
     description="Modular FastAPI backend for AI news aggregation with PostgreSQL",
-    version="3.0.0-postgresql-modular",
+    version="3.0.0-postgresql-modular-deployed",
     lifespan=lifespan
 )
 
