@@ -217,6 +217,24 @@ async def get_digest():
             }
         )
 
+# Migration endpoint (temporary)
+@app.post("/migrate-sources")
+async def migrate_sources():
+    """Create ai_sources table with comprehensive data"""
+    try:
+        from migration_endpoint import create_ai_sources_via_api
+        result = create_ai_sources_via_api()
+        return result
+    except Exception as e:
+        logger.error(f"❌ Migration endpoint failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                'error': 'Migration failed',
+                'message': str(e)
+            }
+        )
+
 # Root endpoint
 @app.get("/")
 async def root():
