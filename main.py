@@ -139,6 +139,96 @@ async def get_sources():
         )
 
 
+@app.post("/admin/cleanup-test-users")
+async def cleanup_test_users(request: dict):
+    """Admin endpoint to cleanup test users"""
+    try:
+        admin_key = request.get('admin_key')
+        if admin_key != 'test-cleanup-key-2025':
+            from fastapi import HTTPException
+            raise HTTPException(status_code=403, detail="Invalid admin key")
+        
+        from db_service import get_database_service
+        db = get_database_service()
+        
+        # Delete test users (emails containing 'test', 'example', or 'debug')
+        cleanup_query = """
+            DELETE FROM users 
+            WHERE email LIKE '%test%' 
+               OR email LIKE '%example%' 
+               OR email LIKE '%debug%'
+               OR email LIKE '%@test.com'
+               OR email LIKE '%@example.com'
+        """
+        
+        db.execute_query(cleanup_query, fetch_results=False)
+        
+        logger.info("✅ Test users cleaned up successfully")
+        return {
+            'success': True,
+            'message': 'Test users cleaned up successfully',
+            'database': 'postgresql'
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Cleanup failed: {str(e)}")
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=500,
+            detail={
+                'error': 'Cleanup failed',
+                'message': str(e)
+            }
+        )
+
+
+# Archive endpoint for newsletter functionality
+@app.get("/archive")
+async def get_archive():
+    """Get newsletter archive - maintained for frontend compatibility"""
+    try:
+        from db_service import get_database_service
+        db = get_database_service()
+        
+        # Get archived newsletters
+        archive_query = """
+            SELECT id, title, content, created_at, sent_at
+            FROM newsletters
+            WHERE sent_at IS NOT NULL
+            ORDER BY sent_at DESC
+            LIMIT 50
+        """
+        
+        archives = db.execute_query(archive_query)
+        
+        processed_archives = []
+        for archive in archives:
+            archive_dict = dict(archive)
+            # Convert timestamps to ISO format
+            for field in ['created_at', 'sent_at']:
+                if archive_dict.get(field):
+                    archive_dict[field] = archive_dict[field].isoformat() if hasattr(archive_dict[field], 'isoformat') else str(archive_dict[field])
+            processed_archives.append(archive_dict)
+        
+        return {
+            'archives': processed_archives,
+            'total_archives': len(processed_archives),
+            'database': 'postgresql'
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Archive endpoint failed: {str(e)}")
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=500,
+            detail={
+                'error': 'Failed to get archive',
+                'message': str(e),
+                'database': 'postgresql'
+            }
+        )
+
+
 # For Railway deployment
 if __name__ == "__main__":
     import uvicorn

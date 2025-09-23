@@ -33,12 +33,16 @@ RUN apt-get update && apt-get install -y \
 COPY --from=builder /root/.local /home/appuser/.local
 
 # Copy application code and requirements (Railway needs this in runtime)
+# Copy the new modular FastAPI architecture
+COPY app/ /app/app/
 COPY api/ /app/api/
+COPY db_service.py .
+COPY main.py .
 COPY comprehensive_ai_sources.py .
 COPY health_check.py .
 COPY requirements.txt .
 COPY .env.production .env
-# Copy existing SQLite database if it exists
+# Copy existing SQLite database for migration to PostgreSQL
 COPY ai_news.db ./ai_news.db
 
 # Create data directory for SQLite database
@@ -57,13 +61,14 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=30s --start-period=10s --retries=3 \
     CMD python health_check.py
 
-# Run the application with uvicorn
-CMD sh -c "echo '=== RAILWAY STARTUP DEBUG ===' && \
+# Run the application with modular FastAPI architecture
+CMD sh -c "echo '=== RAILWAY MODULAR STARTUP DEBUG ===' && \
            echo 'PORT environment variable: $PORT' && \
-           echo 'File version check - first 20 lines of api/index.py:' && head -n 20 /app/api/index.py && \
-           echo 'Searching for FastAPI app creation:' && grep -n 'app = FastAPI' /app/api/index.py || echo 'FastAPI app creation not found!' && \
-           echo 'File size:' && wc -l /app/api/index.py && \
-           echo 'Testing api.index module import:' && python -c 'import api.index; print(\"Module imported successfully\")' && \
-           echo 'Checking module attributes:' && python -c 'import api.index; print(\"Module attributes:\", [attr for attr in dir(api.index) if not attr.startswith(\"_\")])' && \
-           echo 'Looking for app in module:' && python -c 'import api.index; print(\"Has app attribute:\", hasattr(api.index, \"app\"))' && \
-           uvicorn api.index:app --host 0.0.0.0 --port $PORT --log-level debug"
+           echo 'Project structure verification:' && \
+           echo 'Main files:' && ls -la /app/*.py && \
+           echo 'App directory:' && ls -la /app/app/ && \
+           echo 'App routers:' && ls -la /app/app/routers/ && \
+           echo 'Testing main module import:' && python -c 'import main; print(\"Main module imported successfully\")' && \
+           echo 'Testing app.main module import:' && python -c 'from app.main import app; print(\"Modular app imported successfully\")' && \
+           echo 'Database service check:' && python -c 'import db_service; print(\"Database service imported successfully\")' && \
+           python main.py"
