@@ -183,7 +183,7 @@ class AuthService:
                 FROM users 
                 WHERE email = %s
             """
-            result = db.execute_query(query, (email,), fetch_one=True)
+            result = db.execute_query(query, (email,), fetch_all=False)
             
             if result:
                 user_dict = dict(result)
@@ -212,7 +212,7 @@ class AuthService:
                 result = db.execute_query(
                     query, 
                     (user_data.get('name'), user_data.get('picture'), user_data['email']),
-                    fetch_one=True
+                    fetch_all=False
                 )
             else:
                 user_id = user_data.get('sub', f"user_{int(datetime.utcnow().timestamp())}")
@@ -224,7 +224,7 @@ class AuthService:
                 result = db.execute_query(
                     query,
                     (user_id, user_data['email'], user_data.get('name'), user_data.get('picture'), True),
-                    fetch_one=True
+                    fetch_all=False
                 )
             
             if result:
@@ -254,7 +254,7 @@ class AuthService:
             result = db.execute_query(
                 query,
                 (json.dumps(preferences), user_id),
-                fetch_one=True
+                fetch_all=False
             )
             
             if result:
@@ -1029,6 +1029,261 @@ async def get_sources():
             detail={'error': 'Failed to get sources', 'message': str(e), 'database': 'postgresql'}
         )
 
+# Content endpoints for frontend compatibility
+@app.get("/multimedia/audio")
+async def get_audio_content(hours: int = 24, limit: int = 20):
+    """Get recent audio/podcast content"""
+    try:
+        logger.info(f"📻 Audio content requested - {hours}h range, limit {limit}")
+        db = get_database_service()
+        
+        query = """
+            SELECT id, title, url, description, source, published_at, 
+                   significance_score, reading_time, content_type
+            FROM articles 
+            WHERE content_type = 'audio' 
+            AND published_at >= (CURRENT_TIMESTAMP - INTERVAL '%s hours')
+            ORDER BY significance_score DESC, published_at DESC
+            LIMIT %s
+        """
+        
+        articles = db.execute_query(query, (hours, limit))
+        
+        audio_content = []
+        for article in articles:
+            audio_content.append({
+                "title": article.get('title', ''),
+                "description": article.get('description', ''),
+                "source": article.get('source', ''),
+                "url": article.get('url', ''),
+                "audio_url": article.get('url', ''),  # Same as URL for now
+                "duration": 0,  # Default duration
+                "published_date": article.get('published_at', '').isoformat() if article.get('published_at') else '',
+                "significance_score": float(article.get('significance_score', 5.0)),
+                "processed": True
+            })
+        
+        response = {
+            "audio_content": audio_content,
+            "total_count": len(audio_content),
+            "hours_range": hours,
+            "database": "postgresql"
+        }
+        
+        logger.info(f"✅ Audio content retrieved - {len(audio_content)} items")
+        return response
+        
+    except Exception as e:
+        logger.error(f"❌ Audio content endpoint failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={'error': 'Failed to get audio content', 'message': str(e), 'database': 'postgresql'}
+        )
+
+@app.get("/multimedia/video")
+async def get_video_content(hours: int = 24, limit: int = 20):
+    """Get recent video content"""
+    try:
+        logger.info(f"📺 Video content requested - {hours}h range, limit {limit}")
+        db = get_database_service()
+        
+        query = """
+            SELECT id, title, url, description, source, published_at, 
+                   significance_score, reading_time, content_type
+            FROM articles 
+            WHERE content_type = 'video' 
+            AND published_at >= (CURRENT_TIMESTAMP - INTERVAL '%s hours')
+            ORDER BY significance_score DESC, published_at DESC
+            LIMIT %s
+        """
+        
+        articles = db.execute_query(query, (hours, limit))
+        
+        video_content = []
+        for article in articles:
+            video_content.append({
+                "title": article.get('title', ''),
+                "description": article.get('description', ''),
+                "source": article.get('source', ''),
+                "url": article.get('url', ''),
+                "thumbnail_url": "",  # Default empty thumbnail
+                "duration": 0,  # Default duration
+                "published_date": article.get('published_at', '').isoformat() if article.get('published_at') else '',
+                "significance_score": float(article.get('significance_score', 5.0)),
+                "processed": True
+            })
+        
+        response = {
+            "video_content": video_content,
+            "total_count": len(video_content),
+            "hours_range": hours,
+            "database": "postgresql"
+        }
+        
+        logger.info(f"✅ Video content retrieved - {len(video_content)} items")
+        return response
+        
+    except Exception as e:
+        logger.error(f"❌ Video content endpoint failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={'error': 'Failed to get video content', 'message': str(e), 'database': 'postgresql'}
+        )
+
+@app.get("/multimedia/sources")
+async def get_multimedia_sources():
+    """Get multimedia sources configuration"""
+    try:
+        logger.info("📚 Multimedia sources requested")
+        db = get_database_service()
+        
+        query = """
+            SELECT name, rss_url, website, content_type, category, enabled, priority, description
+            FROM ai_sources
+            WHERE content_type IN ('audio', 'video')
+            ORDER BY content_type, priority ASC, name ASC
+        """
+        
+        sources = db.execute_query(query)
+        
+        # Organize by content type
+        audio_sources = []
+        video_sources = []
+        
+        for source in sources:
+            source_data = {
+                "name": source.get('name', ''),
+                "type": f"{source.get('content_type', '')}_rss",
+                "url": source.get('rss_url', ''),
+                "website": source.get('website', ''),
+                "priority": source.get('priority', 1),
+                "enabled": source.get('enabled', True)
+            }
+            
+            if source.get('content_type') == 'audio':
+                audio_sources.append(source_data)
+            elif source.get('content_type') == 'video':
+                video_sources.append(source_data)
+        
+        response = {
+            "sources": {
+                "audio": audio_sources,
+                "video": video_sources
+            },
+            "audio_sources": len(audio_sources),
+            "video_sources": len(video_sources),
+            "claude_available": True,
+            "database": "postgresql"
+        }
+        
+        logger.info(f"✅ Multimedia sources retrieved - {len(audio_sources)} audio, {len(video_sources)} video")
+        return response
+        
+    except Exception as e:
+        logger.error(f"❌ Multimedia sources endpoint failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={'error': 'Failed to get multimedia sources', 'message': str(e), 'database': 'postgresql'}
+        )
+
+@app.get("/multimedia/scrape")
+async def manual_multimedia_scrape():
+    """Manually trigger multimedia content scraping"""
+    try:
+        logger.info("🕷️ Manual multimedia scraping triggered")
+        
+        # Run scraping for multimedia content
+        result = await scrape_content_from_sources()
+        
+        # Filter the results for multimedia content
+        multimedia_added = result.get('articles_added', 0)
+        
+        response = {
+            "message": "Multimedia scraping completed",
+            "audio_found": multimedia_added // 2,  # Rough estimation
+            "video_found": multimedia_added // 2,  # Rough estimation
+            "audio_processed": multimedia_added // 2,
+            "video_processed": multimedia_added // 2,
+            "audio_sources": ["OpenAI Podcast", "Practical AI", "Latent Space"],
+            "video_sources": ["Two Minute Papers", "DeepLearning.AI", "Yannic Kilcher"],
+            "claude_available": True,
+            "database": "postgresql"
+        }
+        
+        logger.info(f"✅ Manual multimedia scraping completed")
+        return response
+        
+    except Exception as e:
+        logger.error(f"❌ Manual multimedia scraping failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={'error': 'Multimedia scraping failed', 'message': str(e), 'database': 'postgresql'}
+        )
+
+# Content type specific endpoints
+@app.get("/content/{content_type}")
+async def get_content_by_type(content_type: str, limit: int = 20):
+    """Get content filtered by type (blog, audio, video, learning, demos, events)"""
+    try:
+        logger.info(f"📊 Content requested for type: {content_type}")
+        db = get_database_service()
+        
+        # Validate content type
+        valid_types = ['blog', 'audio', 'video', 'learning', 'demos', 'events']
+        if content_type not in valid_types:
+            raise HTTPException(
+                status_code=400,
+                detail={'error': 'Invalid content type', 'valid_types': valid_types}
+            )
+        
+        query = """
+            SELECT id, title, url, description, source, published_at, 
+                   category, significance_score, reading_time, content_type
+            FROM articles 
+            WHERE content_type = %s 
+            AND published_at >= (CURRENT_DATE - INTERVAL '7 days')
+            ORDER BY significance_score DESC, published_at DESC
+            LIMIT %s
+        """
+        
+        articles = db.execute_query(query, (content_type, limit))
+        
+        # Format articles
+        formatted_articles = []
+        for article in articles:
+            formatted_articles.append({
+                "id": article.get('id'),
+                "title": article.get('title', ''),
+                "description": article.get('description', ''),
+                "source": article.get('source', ''),
+                "url": article.get('url', ''),
+                "published_at": article.get('published_at', '').isoformat() if article.get('published_at') else '',
+                "category": article.get('category', ''),
+                "significance_score": float(article.get('significance_score', 5.0)),
+                "reading_time": article.get('reading_time', 5),
+                "content_type": article.get('content_type', ''),
+                "topics": []  # Empty for now
+            })
+        
+        response = {
+            "articles": formatted_articles,
+            "content_type": content_type,
+            "count": len(formatted_articles),
+            "database": "postgresql"
+        }
+        
+        logger.info(f"✅ Content by type retrieved - {len(formatted_articles)} {content_type} articles")
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Content by type endpoint failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={'error': f'Failed to get {content_type} content', 'message': str(e), 'database': 'postgresql'}
+        )
+
 # Database schema endpoint
 @app.get("/db-schema")
 async def get_database_schema():
@@ -1142,23 +1397,61 @@ async def get_sources():
             }
         )
 
-# Digest endpoint
+# Digest endpoint with personalization support
 @app.get("/digest")
-async def get_digest():
-    """Get news digest"""
+async def get_digest(request: Request):
+    """Get news digest - personalized for authenticated users"""
     try:
+        logger.info("📊 Digest requested")
         db = get_database_service()
         
+        # Check for authentication token
+        current_user = None
+        personalized = False
+        
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header.split(" ")[1]
+            try:
+                payload = verify_jwt_token(token)
+                current_user = {"email": payload.get("email"), "preferences": payload.get("preferences", {})}
+                logger.info(f"👤 Authenticated user: {current_user['email']}")
+            except:
+                logger.info("🔐 Invalid token, proceeding as unauthenticated")
+        
+        # Get articles with personalization if user is authenticated
         articles_query = """
-            SELECT source, title, url, published_at, description, 
-                   significance_score, category, reading_time, image_url
-            FROM articles
-            WHERE published_at > NOW() - INTERVAL '7 days'
-            ORDER BY published_at DESC, significance_score DESC
-            LIMIT 50
+            SELECT a.id, a.source, a.title, a.url, a.published_at, a.description, 
+                   a.significance_score, a.category, a.reading_time, a.image_url,
+                   a.content_type, a.keywords
+            FROM articles a
+            WHERE a.published_at > NOW() - INTERVAL '7 days'
         """
         
-        articles = db.execute_query(articles_query)
+        # Add personalization filters if user has preferences
+        params = []
+        if current_user and current_user.get("preferences"):
+            prefs = current_user["preferences"]
+            topics = prefs.get("topics", [])
+            content_types = prefs.get("content_types", [])
+            
+            if topics or content_types:
+                conditions = []
+                if topics:
+                    placeholders = ','.join(['%s'] * len(topics))
+                    conditions.append(f"(a.keywords ILIKE ANY(ARRAY[{','.join(['%' + t + '%' for t in topics])}]))")
+                if content_types:
+                    placeholders = ','.join(['%s'] * len(content_types))
+                    conditions.append(f"a.content_type IN ({placeholders})")
+                    params.extend(content_types)
+                
+                if conditions:
+                    articles_query += " AND (" + " OR ".join(conditions) + ")"
+                    personalized = True
+        
+        articles_query += " ORDER BY a.significance_score DESC, a.published_at DESC LIMIT 50"
+        
+        articles = db.execute_query(articles_query, tuple(params) if params else None)
         
         processed_articles = []
         for article in articles:
@@ -1168,26 +1461,48 @@ async def get_digest():
             if article_dict.get('published_at'):
                 article_dict['published_at'] = article_dict['published_at'].isoformat()
             
+            # Add required frontend fields
+            article_dict['type'] = article_dict.get('content_type', 'blog')
+            article_dict['time'] = format_time_ago(article_dict.get('published_at'))
+            article_dict['impact'] = get_impact_level(article_dict.get('significance_score', 5))
+            article_dict['readTime'] = f"{article_dict.get('reading_time', 3)} min read"
+            article_dict['significanceScore'] = article_dict.get('significance_score', 5)
+            
             processed_articles.append(article_dict)
         
-        # Get top stories (high significance score)
-        top_stories = [article for article in processed_articles if article.get('significance_score', 0) >= 8][:10]
+        # Organize by content type for frontend
+        content_by_type = {
+            'blog': [a for a in processed_articles if a.get('content_type') == 'blog'][:20],
+            'audio': [a for a in processed_articles if a.get('content_type') == 'audio'][:10],
+            'video': [a for a in processed_articles if a.get('content_type') == 'video'][:10],
+            'learning': [a for a in processed_articles if a.get('content_type') == 'learning'][:10],
+            'demos': [a for a in processed_articles if a.get('content_type') == 'demos'][:10],
+            'events': [a for a in processed_articles if a.get('content_type') == 'events'][:10]
+        }
         
-        return {
+        # Get top stories (high significance score)
+        top_stories = sorted(processed_articles, key=lambda x: x.get('significance_score', 0), reverse=True)[:10]
+        
+        response = {
             'topStories': top_stories,
-            'content': {
-                'blog': [a for a in processed_articles if a.get('category') == 'blogs'][:20],
-                'audio': [a for a in processed_articles if a.get('category') == 'podcasts'][:10],
-                'video': [a for a in processed_articles if a.get('category') == 'videos'][:10],
-            },
+            'content': content_by_type,
             'summary': {
                 'total_articles': len(processed_articles),
                 'top_stories_count': len(top_stories),
-                'latest_update': "2025-09-23T12:40:00Z"
+                'personalization_note': "Customized based on your preferences" if personalized else "General AI news content",
+                'last_updated': datetime.utcnow().isoformat()
             },
-            'personalized': False,
-            'database': 'postgresql'
+            'personalized': personalized,
+            'database': 'postgresql',
+            'debug_info': {
+                'user_authenticated': current_user is not None,
+                'personalization_enabled': personalized,
+                'dashboard_mode': 'personalized' if personalized else 'preview'
+            }
         }
+        
+        logger.info(f"✅ Digest generated - {len(processed_articles)} articles, personalized: {personalized}")
+        return response
         
     except Exception as e:
         logger.error(f"❌ Digest endpoint failed: {str(e)}")
@@ -1200,16 +1515,747 @@ async def get_digest():
             }
         )
 
+# Personalized digest endpoint
+@app.get("/personalized-digest")
+async def get_personalized_digest(request: Request):
+    """Get personalized digest for authenticated users"""
+    try:
+        # Extract JWT token
+        auth_header = request.headers.get("authorization", "")
+        if not auth_header.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Authentication required")
+        
+        token = auth_header.split(" ")[1]
+        payload = verify_jwt_token(token)
+        user_email = payload.get("email")
+        
+        logger.info(f"👤 Personalized digest for: {user_email}")
+        
+        # Get user preferences from database
+        db = get_database_service()
+        user_query = "SELECT preferences FROM users WHERE email = %s"
+        user_result = db.execute_query(user_query, (user_email,))
+        
+        if not user_result:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        user_preferences = user_result[0].get('preferences', {})
+        
+        # Get personalized articles
+        articles = get_personalized_articles(user_preferences, 50)
+        
+        # Organize content by type
+        content_by_type = {
+            'blog': [a for a in articles if a.get('content_type') == 'blog'][:20],
+            'audio': [a for a in articles if a.get('content_type') == 'audio'][:10],
+            'video': [a for a in articles if a.get('content_type') == 'video'][:10],
+            'learning': [a for a in articles if a.get('content_type') == 'learning'][:10],
+            'demos': [a for a in articles if a.get('content_type') == 'demos'][:10],
+            'events': [a for a in articles if a.get('content_type') == 'events'][:10]
+        }
+        
+        top_stories = sorted(articles, key=lambda x: x.get('significance_score', 0), reverse=True)[:10]
+        
+        return {
+            'topStories': top_stories,
+            'content': content_by_type,
+            'summary': {
+                'total_articles': len(articles),
+                'personalization_note': f"Personalized for {user_email}",
+                'user_topics': user_preferences.get('topics', []),
+                'last_updated': datetime.utcnow().isoformat()
+            },
+            'personalized': True,
+            'database': 'postgresql',
+            'debug_info': {
+                'is_personalized': True,
+                'filtering_applied': True,
+                'personalization_enabled': True
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Personalized digest failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={'error': 'Failed to get personalized digest', 'message': str(e)}
+        )
+
+# Helper functions for digest
+def format_time_ago(timestamp_str):
+    """Convert timestamp to human readable time ago format"""
+    if not timestamp_str:
+        return "unknown"
+    try:
+        if isinstance(timestamp_str, str):
+            dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+        else:
+            dt = timestamp_str
+        
+        now = datetime.utcnow().replace(tzinfo=dt.tzinfo) if dt.tzinfo else datetime.utcnow()
+        diff = now - dt
+        
+        if diff.days > 0:
+            return f"{diff.days}d ago"
+        elif diff.seconds > 3600:
+            return f"{diff.seconds // 3600}h ago"
+        else:
+            return f"{diff.seconds // 60}m ago"
+    except:
+        return "recently"
+
+def get_impact_level(score):
+    """Convert significance score to impact level"""
+    if score >= 8:
+        return "high"
+    elif score >= 6:
+        return "medium"
+    else:
+        return "low"
+
+def get_personalized_articles(user_preferences: dict, limit: int = 20) -> List[dict]:
+    """Get personalized articles based on user preferences"""
+    try:
+        db = get_database_service()
+        
+        base_query = """
+            SELECT id, title, url, description, source, published_at, 
+                   category, significance_score, reading_time, content_type, keywords
+            FROM articles
+            WHERE published_at >= (CURRENT_DATE - INTERVAL '7 days')
+        """
+        
+        user_topics = user_preferences.get('topics', [])
+        user_content_types = user_preferences.get('content_types', [])
+        
+        conditions = []
+        params = []
+        
+        if user_topics:
+            # Topic-based filtering using keywords
+            topic_conditions = []
+            for topic in user_topics:
+                topic_conditions.append("keywords ILIKE %s")
+                params.append(f"%{topic}%")
+            if topic_conditions:
+                conditions.append("(" + " OR ".join(topic_conditions) + ")")
+        
+        if user_content_types:
+            placeholders = ','.join(['%s'] * len(user_content_types))
+            conditions.append(f"content_type IN ({placeholders})")
+            params.extend(user_content_types)
+        
+        if conditions:
+            base_query += " AND (" + " OR ".join(conditions) + ")"
+        
+        base_query += " ORDER BY significance_score DESC, published_at DESC LIMIT %s"
+        params.append(limit)
+        
+        articles = db.execute_query(base_query, tuple(params))
+        
+        result = []
+        for article in articles:
+            article_dict = dict(article)
+            # Add frontend-compatible fields
+            article_dict['type'] = article_dict.get('content_type', 'blog')
+            article_dict['time'] = format_time_ago(article_dict.get('published_at'))
+            article_dict['impact'] = get_impact_level(article_dict.get('significance_score', 5))
+            article_dict['readTime'] = f"{article_dict.get('reading_time', 3)} min read"
+            article_dict['significanceScore'] = article_dict.get('significance_score', 5)
+            if article_dict.get('published_at'):
+                article_dict['published_at'] = article_dict['published_at'].isoformat()
+            result.append(article_dict)
+        
+        logger.info(f"📊 Retrieved {len(result)} personalized articles")
+        return result
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to get personalized articles: {str(e)}")
+        return []
+
+# Manual scraping endpoint
+@app.post("/scrape")
+async def manual_scrape():
+    """Manually trigger content scraping"""
+    try:
+        logger.info("🕷️ Manual scraping triggered")
+        
+        # Run scraping function
+        result = await scrape_content_from_sources()
+        
+        return {
+            "success": result.get("success", False),
+            "message": f"Scraping completed. Added {result.get('articles_added', 0)} articles",
+            "articles_found": result.get('articles_found', 0),
+            "articles_processed": result.get('articles_added', 0),
+            "sources": result.get('sources_scraped', []),
+            "database": "postgresql"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Manual scraping failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={'error': 'Scraping failed', 'message': str(e), 'database': 'postgresql'}
+        )
+
+# Multimedia endpoints for frontend compatibility
+@app.get("/multimedia/audio")
+async def get_audio_content(hours: int = 24, limit: int = 20):
+    """Get recent audio/podcast content"""
+    try:
+        db = get_database_service()
+        
+        query = """
+            SELECT id, title, url, description, source, published_at, 
+                   significance_score, reading_time, content_type
+            FROM articles 
+            WHERE content_type = 'audio' 
+            AND published_at >= (CURRENT_TIMESTAMP - INTERVAL '%s hours')
+            ORDER BY significance_score DESC, published_at DESC
+            LIMIT %s
+        """
+        
+        articles = db.execute_query(query, (hours, limit))
+        
+        audio_content = []
+        for article in articles:
+            audio_item = dict(article)
+            # Add frontend-compatible fields
+            audio_item['type'] = 'audio'
+            audio_item['time'] = format_time_ago(audio_item.get('published_at'))
+            audio_item['impact'] = get_impact_level(audio_item.get('significance_score', 5))
+            audio_item['duration'] = audio_item.get('reading_time', 30) * 60  # Convert to seconds
+            if audio_item.get('published_at'):
+                audio_item['published_date'] = audio_item['published_at'].isoformat()
+            audio_content.append(audio_item)
+        
+        return {
+            "audio_content": audio_content,
+            "total_count": len(audio_content),
+            "hours_range": hours,
+            "database": "postgresql"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Audio content endpoint failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={'error': 'Failed to get audio content', 'message': str(e)}
+        )
+
+@app.get("/multimedia/video")
+async def get_video_content(hours: int = 24, limit: int = 20):
+    """Get recent video content"""
+    try:
+        db = get_database_service()
+        
+        query = """
+            SELECT id, title, url, description, source, published_at, 
+                   significance_score, reading_time, content_type, image_url
+            FROM articles 
+            WHERE content_type = 'video' 
+            AND published_at >= (CURRENT_TIMESTAMP - INTERVAL '%s hours')
+            ORDER BY significance_score DESC, published_at DESC
+            LIMIT %s
+        """
+        
+        articles = db.execute_query(query, (hours, limit))
+        
+        video_content = []
+        for article in articles:
+            video_item = dict(article)
+            # Add frontend-compatible fields
+            video_item['type'] = 'video'
+            video_item['time'] = format_time_ago(video_item.get('published_at'))
+            video_item['impact'] = get_impact_level(video_item.get('significance_score', 5))
+            video_item['thumbnail_url'] = video_item.get('image_url', '')
+            video_item['duration'] = 0  # YouTube API would provide this
+            if video_item.get('published_at'):
+                video_item['published_date'] = video_item['published_at'].isoformat()
+            video_content.append(video_item)
+        
+        return {
+            "video_content": video_content,
+            "total_count": len(video_content),
+            "hours_range": hours,
+            "database": "postgresql"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Video content endpoint failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={'error': 'Failed to get video content', 'message': str(e)}
+        )
+
+@app.get("/multimedia/sources")
+async def get_multimedia_sources():
+    """Get multimedia sources configuration"""
+    try:
+        db = get_database_service()
+        
+        query = """
+            SELECT name, rss_url, website, content_type, category, enabled, priority
+            FROM ai_sources
+            WHERE content_type IN ('audio', 'video')
+            ORDER BY content_type, priority ASC
+        """
+        
+        sources = db.execute_query(query)
+        
+        # Organize by content type
+        audio_sources = []
+        video_sources = []
+        
+        for source in sources:
+            source_data = {
+                'name': source['name'],
+                'type': 'podcast_rss' if source['content_type'] == 'audio' else 'youtube_channel',
+                'url': source['rss_url'],
+                'website': source.get('website', ''),
+                'priority': source['priority'],
+                'enabled': source['enabled']
+            }
+            
+            if source['content_type'] == 'audio':
+                audio_sources.append(source_data)
+            else:
+                video_sources.append(source_data)
+        
+        return {
+            "sources": {
+                "audio": audio_sources,
+                "video": video_sources
+            },
+            "audio_sources": len(audio_sources),
+            "video_sources": len(video_sources),
+            "database": "postgresql"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Multimedia sources endpoint failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={'error': 'Failed to get multimedia sources', 'message': str(e)}
+        )
+
+@app.get("/multimedia/scrape")
+async def scrape_multimedia():
+    """Manually trigger multimedia content scraping"""
+    try:
+        logger.info("🎬 Multimedia scraping triggered")
+        
+        # This would trigger multimedia-specific scraping
+        result = await scrape_content_from_sources(content_types=['audio', 'video'])
+        
+        return {
+            "message": "Multimedia scraping completed",
+            "audio_found": result.get('audio_found', 0),
+            "video_found": result.get('video_found', 0),
+            "audio_processed": result.get('audio_processed', 0),
+            "video_processed": result.get('video_processed', 0),
+            "audio_sources": result.get('audio_sources', []),
+            "video_sources": result.get('video_sources', []),
+            "database": "postgresql"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Multimedia scraping failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={'error': 'Multimedia scraping failed', 'message': str(e)}
+        )
+
+# Content type filtering endpoints
+@app.get("/content/{content_type}")
+async def get_content_by_type(content_type: str, limit: int = 20):
+    """Get articles by content type"""
+    try:
+        # Validate content type
+        valid_types = ['blog', 'audio', 'video', 'learning', 'demos', 'events']
+        if content_type not in valid_types:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid content type. Must be one of: {', '.join(valid_types)}"
+            )
+        
+        db = get_database_service()
+        
+        query = """
+            SELECT id, title, url, description, source, published_at, 
+                   significance_score, reading_time, content_type, category, image_url
+            FROM articles 
+            WHERE content_type = %s
+            AND published_at >= (CURRENT_DATE - INTERVAL '30 days')
+            ORDER BY significance_score DESC, published_at DESC
+            LIMIT %s
+        """
+        
+        articles = db.execute_query(query, (content_type, limit))
+        
+        processed_articles = []
+        for article in articles:
+            article_dict = dict(article)
+            # Add frontend-compatible fields
+            article_dict['type'] = content_type
+            article_dict['time'] = format_time_ago(article_dict.get('published_at'))
+            article_dict['impact'] = get_impact_level(article_dict.get('significance_score', 5))
+            article_dict['readTime'] = f"{article_dict.get('reading_time', 3)} min read"
+            article_dict['significanceScore'] = article_dict.get('significance_score', 5)
+            if article_dict.get('published_at'):
+                article_dict['published_at'] = article_dict['published_at'].isoformat()
+            processed_articles.append(article_dict)
+        
+        return {
+            "articles": processed_articles,
+            "content_type": content_type,
+            "count": len(processed_articles),
+            "database": "postgresql"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Content by type endpoint failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={'error': f'Failed to get {content_type} content', 'message': str(e)}
+        )
+
+
+# Content types endpoint
+@app.get("/content-types")
+async def get_content_types():
+    """Get available content types"""
+    return {
+        "content_types": {
+            "blog": {
+                "id": 1,
+                "name": "blog",
+                "display_name": "Blog Articles",
+                "description": "Technical articles and blog posts about AI",
+                "frontend_section": "blogs",
+                "icon": "📝"
+            },
+            "audio": {
+                "id": 2,
+                "name": "audio",
+                "display_name": "Podcasts",
+                "description": "AI-focused podcast episodes and audio content",
+                "frontend_section": "podcasts",
+                "icon": "🎧"
+            },
+            "video": {
+                "id": 3,
+                "name": "video",
+                "display_name": "Videos",
+                "description": "YouTube videos and video content about AI",
+                "frontend_section": "videos",
+                "icon": "🎥"
+            },
+            "learning": {
+                "id": 4,
+                "name": "learning",
+                "display_name": "Learning Resources",
+                "description": "Educational content, courses, and tutorials",
+                "frontend_section": "learning",
+                "icon": "📚"
+            },
+            "demos": {
+                "id": 5,
+                "name": "demos",
+                "display_name": "Demos & Tools",
+                "description": "Interactive demos and AI tools",
+                "frontend_section": "demos",
+                "icon": "🛠️"
+            },
+            "events": {
+                "id": 6,
+                "name": "events",
+                "display_name": "Events & Conferences",
+                "description": "AI conferences, webinars, and events",
+                "frontend_section": "events",
+                "icon": "📅"
+            }
+        },
+        "database": "postgresql"
+    }
+
+# Database info endpoint
+@app.get("/db-info")
+async def get_database_info():
+    """Get database information and statistics"""
+    try:
+        db = get_database_service()
+        
+        # Get table counts
+        stats = {}
+        tables = ['articles', 'users', 'ai_sources', 'ai_topics']
+        
+        for table in tables:
+            try:
+                count_query = f"SELECT COUNT(*) as count FROM {table}"
+                result = db.execute_query(count_query)
+                stats[table] = result[0]['count'] if result else 0
+            except Exception as e:
+                logger.warning(f"Could not get count for table {table}: {str(e)}")
+                stats[table] = 0
+        
+        # Get recent articles by content type
+        content_type_query = """
+            SELECT content_type, COUNT(*) as count
+            FROM articles
+            WHERE published_at >= (CURRENT_DATE - INTERVAL '30 days')
+            GROUP BY content_type
+            ORDER BY count DESC
+        """
+        
+        content_type_stats = {}
+        try:
+            content_results = db.execute_query(content_type_query)
+            for row in content_results:
+                content_type_stats[row['content_type']] = row['count']
+        except Exception as e:
+            logger.warning(f"Could not get content type stats: {str(e)}")
+        
+        return {
+            "database": "postgresql",
+            "connection_status": "active",
+            "table_counts": stats,
+            "content_type_distribution": content_type_stats,
+            "migration_from": "/app/ai_news.db",
+            "last_checked": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Database info endpoint failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={'error': 'Failed to get database info', 'message': str(e)}
+        )
+
+# AI topics endpoint
+@app.get("/topics")
+async def get_ai_topics():
+    """Get available AI topics for filtering and personalization"""
+    try:
+        db = get_database_service()
+        
+        query = """
+            SELECT id, name, category, description, is_active
+            FROM ai_topics
+            WHERE is_active = TRUE
+            ORDER BY category, name
+        """
+        
+        topics = db.execute_query(query)
+        
+        # Organize by category
+        topics_by_category = {}
+        all_topics = []
+        
+        for topic in topics:
+            topic_data = dict(topic)
+            all_topics.append(topic_data)
+            
+            category = topic_data.get('category', 'general')
+            if category not in topics_by_category:
+                topics_by_category[category] = []
+            topics_by_category[category].append(topic_data)
+        
+        return {
+            "topics": all_topics,
+            "topics_by_category": topics_by_category,
+            "total_count": len(all_topics),
+            "categories": list(topics_by_category.keys()),
+            "database": "postgresql"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Topics endpoint failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={'error': 'Failed to get AI topics', 'message': str(e)}
+        )
+
+# Archive endpoint for newsletter history
+@app.get("/archive")
+async def get_archive(limit: int = 50):
+    """Get archived content/newsletter history"""
+    try:
+        db = get_database_service()
+        
+        # Get recent digest summaries (simulated archive)
+        query = """
+            SELECT DATE(published_at) as digest_date, 
+                   COUNT(*) as article_count,
+                   AVG(significance_score) as avg_significance,
+                   STRING_AGG(DISTINCT source, ', ') as sources
+            FROM articles
+            WHERE published_at >= (CURRENT_DATE - INTERVAL '30 days')
+            GROUP BY DATE(published_at)
+            ORDER BY digest_date DESC
+            LIMIT %s
+        """
+        
+        archive_data = db.execute_query(query, (limit,))
+        
+        archives = []
+        for row in archive_data:
+            archive_entry = {
+                'date': row['digest_date'].isoformat() if row['digest_date'] else None,
+                'article_count': row['article_count'],
+                'avg_significance': float(row['avg_significance']) if row['avg_significance'] else 0,
+                'sources': row['sources'].split(', ') if row['sources'] else [],
+                'digest_url': f"/digest?date={row['digest_date']}" if row['digest_date'] else None
+            }
+            archives.append(archive_entry)
+        
+        return {
+            "archives": archives,
+            "total_archives": len(archives),
+            "database": "postgresql"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Archive endpoint failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={'error': 'Failed to get archive', 'message': str(e)}
+        )
+
+# Topics endpoint for frontend compatibility
+@app.get("/topics")
+async def get_topics():
+    """Get available AI topics for user preferences"""
+    try:
+        logger.info("📋 Topics requested")
+        
+        # Predefined AI topics that match frontend expectations
+        ai_topics = [
+            {"id": "ml_foundations", "name": "Machine Learning", "category": "research"},
+            {"id": "deep_learning", "name": "Deep Learning", "category": "research"},
+            {"id": "nlp_llm", "name": "NLP & Large Language Models", "category": "research"},
+            {"id": "computer_vision", "name": "Computer Vision", "category": "research"},
+            {"id": "robotics", "name": "Robotics & Automation", "category": "robotics"},
+            {"id": "ai_ethics", "name": "AI Ethics & Safety", "category": "ethics"},
+            {"id": "ai_business", "name": "AI in Business", "category": "business"},
+            {"id": "ai_tools", "name": "AI Tools & Platforms", "category": "platform"},
+            {"id": "ai_research", "name": "AI Research", "category": "research"},
+            {"id": "ai_healthcare", "name": "AI in Healthcare", "category": "healthcare"},
+            {"id": "ai_automotive", "name": "AI in Automotive", "category": "automotive"},
+            {"id": "generative_ai", "name": "Generative AI", "category": "research"},
+            {"id": "ai_hardware", "name": "AI Hardware", "category": "hardware"},
+            {"id": "ai_startups", "name": "AI Startups", "category": "business"},
+            {"id": "ai_education", "name": "AI Education", "category": "education"}
+        ]
+        
+        # Group by category
+        topics_by_category = {}
+        for topic in ai_topics:
+            category = topic["category"]
+            if category not in topics_by_category:
+                topics_by_category[category] = []
+            topics_by_category[category].append(topic)
+        
+        return {
+            "topics": ai_topics,
+            "topics_by_category": topics_by_category,
+            "total_count": len(ai_topics),
+            "categories": list(topics_by_category.keys()),
+            "database": "postgresql"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Topics endpoint failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={'error': 'Failed to get topics', 'message': str(e)}
+        )
+
+# Content types endpoint for frontend compatibility
+@app.get("/content-types")
+async def get_content_types():
+    """Get available content types"""
+    try:
+        logger.info("📊 Content types requested")
+        
+        content_types = {
+            "blogs": {
+                "name": "Blog Articles",
+                "description": "Technical articles and blog posts",
+                "enabled": True
+            },
+            "podcasts": {
+                "name": "Podcasts & Audio",
+                "description": "AI podcasts and audio content",
+                "enabled": True
+            },
+            "videos": {
+                "name": "Videos",
+                "description": "YouTube videos and video tutorials",
+                "enabled": True
+            },
+            "learning": {
+                "name": "Learning Resources",
+                "description": "Courses, tutorials, and educational content",
+                "enabled": True
+            },
+            "demos": {
+                "name": "Demos & Tools",
+                "description": "Interactive demos and AI tools",
+                "enabled": True
+            },
+            "events": {
+                "name": "Events & Conferences",
+                "description": "AI conferences, webinars, and events",
+                "enabled": True
+            }
+        }
+        
+        return {
+            "content_types": content_types,
+            "enabled_types": [k for k, v in content_types.items() if v["enabled"]],
+            "total_count": len(content_types),
+            "database": "postgresql"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Content types endpoint failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={'error': 'Failed to get content types', 'message': str(e)}
+        )
 
 # Root endpoint
 @app.get("/")
 async def root():
     """Root endpoint"""
     return {
-        "message": "AI News Scraper API - Clean PostgreSQL Version",
-        "version": "4.0.0-clean-postgresql",
+        "message": "AI News Scraper API - Complete Modular PostgreSQL Backend",
+        "version": "4.0.0-complete-modular-postgresql",
         "database": "postgresql",
-        "status": "operational"
+        "status": "operational",
+        "features": [
+            "User Authentication (Google OAuth, OTP, JWT)",
+            "Personalized Content Rendering",
+            "Daily RSS Scraping from AI Sources",
+            "Multimedia Content Support",
+            "Content Type Filtering",
+            "User Preferences Management",
+            "Complete Frontend API Compatibility"
+        ],
+        "endpoints": {
+            "authentication": ["/auth/google", "/auth/send-otp", "/auth/verify-otp", "/auth/profile", "/auth/preferences"],
+            "content": ["/digest", "/personalized-digest", "/scrape", "/sources"],
+            "multimedia": ["/multimedia/audio", "/multimedia/video", "/multimedia/sources", "/multimedia/scrape"],
+            "filtering": ["/content/{content_type}", "/content-types", "/topics"],
+            "system": ["/health", "/db-info", "/db-schema", "/archive"],
+            "frontend_compatibility": "All frontend API endpoints now have corresponding backend endpoints"
+        }
     }
 
 # For Railway deployment

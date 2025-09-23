@@ -1,0 +1,13 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+restartPolicyType = "on_failure"
+
+[volumes]
+data = "/app/data"
+
+[env]
+RAILWAY_VOLUME_MOUNT_PATH = "/app/data"

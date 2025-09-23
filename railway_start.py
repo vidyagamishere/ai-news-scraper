@@ -25,7 +25,33 @@ def ensure_correct_main_file():
             logger.error("❌ clean_main.py not found!")
             sys.exit(1)
         
-        logger.info("✅ clean_main.py found - using modular PostgreSQL backend")
+        logger.info("✅ clean_main.py found - using COMPREHENSIVE modular PostgreSQL backend")
+        
+        # Check file content to verify we have the comprehensive version
+        with open('clean_main.py', 'r') as f:
+            content = f.read()
+            
+        # Check for key indicators of comprehensive version
+        has_content_types = '/content-types' in content
+        has_multimedia = '/multimedia/audio' in content
+        has_comprehensive_version = '4.0.0-complete-modular-postgresql' in content
+        has_topics_endpoint = '@app.get("/topics")' in content
+        has_auth_profile = '/auth/profile' in content
+        
+        logger.info(f"📊 Comprehensive version indicators:")
+        logger.info(f"  - Content-types endpoint: {'✅' if has_content_types else '❌'}")
+        logger.info(f"  - Multimedia endpoints: {'✅' if has_multimedia else '❌'}")
+        logger.info(f"  - Topics endpoint: {'✅' if has_topics_endpoint else '❌'}")
+        logger.info(f"  - Auth profile endpoint: {'✅' if has_auth_profile else '❌'}")
+        logger.info(f"  - Comprehensive version string: {'✅' if has_comprehensive_version else '❌'}")
+        
+        if not (has_content_types and has_multimedia and has_comprehensive_version and has_topics_endpoint and has_auth_profile):
+            logger.error("❌ clean_main.py does not contain comprehensive endpoints!")
+            logger.error("❌ This appears to be the basic version, not the comprehensive one")
+            logger.error("❌ Railway will not start with incomplete backend")
+            return False
+        
+        logger.info("✅ VERIFIED: clean_main.py contains comprehensive endpoint implementation")
         
         # Log environment check
         postgres_url = os.getenv('POSTGRES_URL')
@@ -107,7 +133,8 @@ def start_application():
 
 if __name__ == "__main__":
     logger.info("🚂 Railway deployment starting...")
-    logger.info("📋 Using clean modular PostgreSQL backend architecture")
+    logger.info("📋 Using COMPLETE modular PostgreSQL backend with comprehensive endpoints")
+    logger.info("🎯 Version: 4.0.0-complete-modular-postgresql")
     
     # Perform startup checks
     if not ensure_correct_main_file():
