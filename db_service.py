@@ -206,6 +206,7 @@ class PostgreSQLService:
                     """)
                     
                     # Create ai_sources table (consolidated sources table)
+                    # First, ensure the table has all required columns
                     cursor.execute("""
                         CREATE TABLE IF NOT EXISTS ai_sources (
                             id SERIAL PRIMARY KEY,
@@ -216,7 +217,7 @@ class PostgreSQLService:
                             category VARCHAR(100),
                             enabled BOOLEAN DEFAULT TRUE,
                             priority INTEGER DEFAULT 5,
-                            ai_topic_id VARCHAR(100) REFERENCES ai_topics(id),
+                            ai_topic_id VARCHAR(100),
                             meta_tags TEXT,
                             description TEXT,
                             last_scraped TIMESTAMP,
@@ -225,15 +226,44 @@ class PostgreSQLService:
                         );
                     """)
                     
-                    # Create indexes for performance
-                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_articles_published_at ON articles(published_at DESC);")
-                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_articles_content_type ON articles(content_type_id);")
-                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_articles_topic ON articles(ai_topic_id);")
-                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_article_topics_article ON article_topics(article_id);")
-                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_article_topics_topic ON article_topics(topic_id);")
-                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);")
-                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_sources_enabled ON ai_sources(enabled);")
-                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_sources_topic ON ai_sources(ai_topic_id);")
+                    # Add foreign key constraint separately (in case ai_topics doesn't exist yet)
+                    try:
+                        cursor.execute("""
+                            ALTER TABLE ai_sources 
+                            ADD CONSTRAINT fk_ai_sources_topic 
+                            FOREIGN KEY (ai_topic_id) REFERENCES ai_topics(id);
+                        """)
+                    except Exception as fk_error:
+                        logger.warning(f"⚠️ Foreign key constraint already exists or ai_topics not ready: {fk_error}")
+                    
+                    # Ensure enabled column exists (in case of partial table creation)
+                    try:
+                        cursor.execute("""
+                            ALTER TABLE ai_sources 
+                            ADD COLUMN IF NOT EXISTS enabled BOOLEAN DEFAULT TRUE;
+                        """)
+                    except Exception as col_error:
+                        logger.warning(f"⚠️ Column enabled already exists: {col_error}")
+                    
+                    # Create indexes for performance with error handling
+                    index_queries = [
+                        ("idx_articles_published_at", "CREATE INDEX IF NOT EXISTS idx_articles_published_at ON articles(published_at DESC);"),
+                        ("idx_articles_content_type", "CREATE INDEX IF NOT EXISTS idx_articles_content_type ON articles(content_type_id);"),
+                        ("idx_articles_topic", "CREATE INDEX IF NOT EXISTS idx_articles_topic ON articles(ai_topic_id);"),
+                        ("idx_article_topics_article", "CREATE INDEX IF NOT EXISTS idx_article_topics_article ON article_topics(article_id);"),
+                        ("idx_article_topics_topic", "CREATE INDEX IF NOT EXISTS idx_article_topics_topic ON article_topics(topic_id);"),
+                        ("idx_users_email", "CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);"),
+                        ("idx_ai_sources_enabled", "CREATE INDEX IF NOT EXISTS idx_ai_sources_enabled ON ai_sources(enabled);"),
+                        ("idx_ai_sources_topic", "CREATE INDEX IF NOT EXISTS idx_ai_sources_topic ON ai_sources(ai_topic_id);")
+                    ]
+                    
+                    for index_name, index_query in index_queries:
+                        try:
+                            cursor.execute(index_query)
+                            logger.info(f"✅ Index {index_name} created successfully")
+                        except Exception as idx_error:
+                            logger.warning(f"⚠️ Index {index_name} creation failed: {idx_error}")
+                            # Continue with other indexes
                     
                     # Consolidate sources tables - migrate any data from old 'sources' table to 'ai_sources'
                     cursor.execute("""
