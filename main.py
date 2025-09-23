@@ -100,8 +100,8 @@ async def get_sources():
         db = get_database_service()
         
         sources_query = """
-            SELECT name, url, content_type, category, priority, enabled
-            FROM sources
+            SELECT name, rss_url, website, content_type, category, priority, enabled
+            FROM ai_sources
             WHERE enabled = TRUE
             ORDER BY priority ASC, name ASC
         """
@@ -112,9 +112,10 @@ async def get_sources():
         for source in sources:
             processed_sources.append({
                 'name': source['name'],
-                'url': source['url'],
+                'rss_url': source['rss_url'],
+                'website': source.get('website', ''),
                 'content_type': source['content_type'],
-                'category': source['category'],
+                'category': source.get('category', 'general'),
                 'priority': source['priority'],
                 'enabled': source['enabled']
             })

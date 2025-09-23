@@ -205,16 +205,18 @@ class PostgreSQLService:
                         );
                     """)
                     
-                    # Create ai_sources table
+                    # Create ai_sources table (consolidated sources table)
                     cursor.execute("""
                         CREATE TABLE IF NOT EXISTS ai_sources (
                             id SERIAL PRIMARY KEY,
                             name VARCHAR(255) NOT NULL,
-                            url TEXT NOT NULL,
+                            rss_url TEXT NOT NULL,
+                            website TEXT,
                             content_type VARCHAR(50) NOT NULL,
-                            ai_topic_id VARCHAR(100) REFERENCES ai_topics(id),
-                            is_active BOOLEAN DEFAULT TRUE,
+                            category VARCHAR(100),
+                            enabled BOOLEAN DEFAULT TRUE,
                             priority INTEGER DEFAULT 5,
+                            ai_topic_id VARCHAR(100) REFERENCES ai_topics(id),
                             meta_tags TEXT,
                             description TEXT,
                             last_scraped TIMESTAMP,
@@ -230,8 +232,35 @@ class PostgreSQLService:
                     cursor.execute("CREATE INDEX IF NOT EXISTS idx_article_topics_article ON article_topics(article_id);")
                     cursor.execute("CREATE INDEX IF NOT EXISTS idx_article_topics_topic ON article_topics(topic_id);")
                     cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);")
-                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_sources_active ON ai_sources(is_active);")
+                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_sources_enabled ON ai_sources(enabled);")
                     cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_sources_topic ON ai_sources(ai_topic_id);")
+                    
+                    # Consolidate sources tables - migrate any data from old 'sources' table to 'ai_sources'
+                    cursor.execute("""
+                        DO $$
+                        BEGIN
+                            -- Check if old 'sources' table exists and migrate data
+                            IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'sources') THEN
+                                -- Migrate data from sources to ai_sources if ai_sources is empty
+                                INSERT INTO ai_sources (name, rss_url, website, content_type, category, enabled, priority)
+                                SELECT 
+                                    name, 
+                                    COALESCE(rss_url, url) as rss_url,
+                                    website,
+                                    COALESCE(content_type, 'articles') as content_type,
+                                    COALESCE(category, 'general') as category,
+                                    COALESCE(enabled, true) as enabled,
+                                    COALESCE(priority, 5) as priority
+                                FROM sources
+                                WHERE NOT EXISTS (SELECT 1 FROM ai_sources WHERE ai_sources.name = sources.name);
+                                
+                                -- Drop the old sources table
+                                DROP TABLE sources CASCADE;
+                                
+                                RAISE NOTICE 'Migrated data from sources table to ai_sources and dropped old table';
+                            END IF;
+                        END $$;
+                    """)
                     
                     # Create optimized database views
                     self.create_database_views(cursor)
@@ -239,6 +268,7 @@ class PostgreSQLService:
                     # Populate master data
                     self.populate_content_types(cursor)
                     self.populate_ai_topics(cursor)
+                    self.populate_ai_sources(cursor)
                     
                     conn.commit()
                     logger.info("✅ PostgreSQL database schema initialized successfully")
@@ -371,6 +401,74 @@ class PostgreSQLService:
             """, (topic_id, name, description, category, True))
         
         logger.info("✅ AI topics populated successfully")
+    
+    def populate_ai_sources(self, cursor):
+        """Populate ai_sources table with comprehensive AI news sources"""
+        # Check if ai_sources already has data
+        cursor.execute("SELECT COUNT(*) FROM ai_sources")
+        existing_count = cursor.fetchone()['count']
+        
+        if existing_count > 0:
+            logger.info(f"📊 Found {existing_count} existing AI sources, skipping population")
+            return
+            
+        logger.info("📋 Populating ai_sources table...")
+        
+        # Comprehensive AI news sources
+        ai_sources = [
+            # AI Research & Papers
+            ("OpenAI Blog", "https://openai.com/blog/rss/", "https://openai.com/blog", "blogs", "research", True, 1),
+            ("Anthropic Blog", "https://www.anthropic.com/news", "https://www.anthropic.com", "blogs", "research", True, 1),
+            ("DeepMind Blog", "https://deepmind.google/discover/blog/", "https://deepmind.google", "blogs", "research", True, 1),
+            ("AI Research", "https://ai.googleblog.com/feeds/posts/default", "https://ai.googleblog.com", "blogs", "research", True, 2),
+            ("Meta AI Blog", "https://ai.meta.com/blog/", "https://ai.meta.com", "blogs", "research", True, 2),
+            
+            # Industry & Business
+            ("VentureBeat AI", "https://venturebeat.com/ai/feed/", "https://venturebeat.com/ai", "blogs", "business", True, 2),
+            ("TechCrunch AI", "https://techcrunch.com/category/artificial-intelligence/feed/", "https://techcrunch.com", "blogs", "business", True, 2),
+            ("The Information AI", "https://www.theinformation.com/topics/artificial-intelligence", "https://www.theinformation.com", "blogs", "business", True, 3),
+            ("MIT Technology Review AI", "https://www.technologyreview.com/topic/artificial-intelligence/", "https://www.technologyreview.com", "blogs", "research", True, 2),
+            
+            # Technical News
+            ("Towards Data Science", "https://towardsdatascience.com/feed", "https://towardsdatascience.com", "blogs", "technical", True, 3),
+            ("AI News", "https://artificialintelligence-news.com/feed/", "https://artificialintelligence-news.com", "blogs", "technical", True, 3),
+            ("Machine Learning Mastery", "https://machinelearningmastery.com/feed/", "https://machinelearningmastery.com", "blogs", "education", True, 4),
+            ("Analytics Vidhya", "https://www.analyticsvidhya.com/blog/feed/", "https://www.analyticsvidhya.com", "blogs", "education", True, 4),
+            
+            # Podcasts
+            ("Lex Fridman Podcast", "https://lexfridman.com/podcast/", "https://lexfridman.com", "podcasts", "interviews", True, 2),
+            ("AI Podcast", "https://blogs.nvidia.com/ai-podcast/", "https://blogs.nvidia.com", "podcasts", "technical", True, 3),
+            ("The AI Podcast by NVIDIA", "https://soundcloud.com/theaipodcast", "https://soundcloud.com/theaipodcast", "podcasts", "technical", True, 3),
+            
+            # Videos & YouTube
+            ("Two Minute Papers", "https://www.youtube.com/c/K%C3%A1rolyZsolnai", "https://www.youtube.com/c/K%C3%A1rolyZsolnai", "videos", "education", True, 3),
+            ("AI Explained", "https://www.youtube.com/c/AIExplained-Official", "https://www.youtube.com/c/AIExplained-Official", "videos", "education", True, 4),
+            ("Yannic Kilcher", "https://www.youtube.com/c/YannicKilcher", "https://www.youtube.com/c/YannicKilcher", "videos", "research", True, 4),
+            
+            # Learning Resources
+            ("Coursera AI Blog", "https://blog.coursera.org/tag/artificial-intelligence/", "https://blog.coursera.org", "learning", "education", True, 4),
+            ("edX AI News", "https://blog.edx.org/tag/artificial-intelligence", "https://blog.edx.org", "learning", "education", True, 4),
+            ("Udacity AI Blog", "https://blog.udacity.com/tag/artificial-intelligence", "https://blog.udacity.com", "learning", "education", True, 4),
+            
+            # Demonstrations & Tools
+            ("Hugging Face Blog", "https://huggingface.co/blog", "https://huggingface.co", "demos", "platform", True, 2),
+            ("OpenAI Platform", "https://platform.openai.com/docs", "https://platform.openai.com", "demos", "platform", True, 2),
+            ("Papers with Code", "https://paperswithcode.com/", "https://paperswithcode.com", "demos", "research", True, 3),
+            
+            # Events & Conferences
+            ("NeurIPS", "https://neurips.cc/", "https://neurips.cc", "events", "research", True, 3),
+            ("ICML", "https://icml.cc/", "https://icml.cc", "events", "research", True, 3),
+            ("ICLR", "https://iclr.cc/", "https://iclr.cc", "events", "research", True, 3)
+        ]
+        
+        for name, rss_url, website, content_type, category, enabled, priority in ai_sources:
+            cursor.execute("""
+                INSERT INTO ai_sources (name, rss_url, website, content_type, category, enabled, priority)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (name) DO NOTHING
+            """, (name, rss_url, website, content_type, category, enabled, priority))
+        
+        logger.info("✅ AI sources populated successfully")
     
     def migrate_from_sqlite(self):
         """Migrate data from SQLite to PostgreSQL"""

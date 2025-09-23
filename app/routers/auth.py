@@ -27,7 +27,7 @@ def get_auth_service() -> AuthService:
     return AuthService()
 
 
-@router.post("/auth/google", response_model=TokenResponse)
+@router.post("/auth/google")
 async def google_auth(
     request: GoogleAuthRequest,
     auth_service: AuthService = Depends(get_auth_service)
@@ -35,6 +35,7 @@ async def google_auth(
     """
     Google OAuth authentication - compatible with existing frontend
     Endpoint: POST /auth/google (same as before)
+    Returns AuthResponse format expected by frontend
     """
     try:
         logger.info("🔐 Processing Google authentication")
@@ -85,11 +86,22 @@ async def google_auth(
         # Create JWT token
         jwt_token = auth_service.create_jwt_token(user_data)
         
-        response = TokenResponse(
-            access_token=jwt_token,
-            token_type="bearer",
-            user=UserResponse(**user)
-        )
+        # Return AuthResponse format expected by frontend
+        response = {
+            'success': True,
+            'message': f'Authentication successful for {user_data["email"]}',
+            'token': jwt_token,
+            'user': {
+                'id': str(user['id']),
+                'email': str(user['email']),
+                'name': str(user.get('name', '')),
+                'picture': str(user.get('profile_image', user_data.get('picture', ''))),
+                'verified_email': bool(user.get('verified_email', True))
+            },
+            'expires_in': 3600,  # 1 hour
+            'router_auth': False,  # Modular architecture
+            'isUserExist': True  # User exists after creation/update
+        }
         
         logger.info(f"✅ Google authentication successful for: {user_data['email']}")
         return response
@@ -150,7 +162,7 @@ async def send_otp(
         )
 
 
-@router.post("/auth/verify-otp", response_model=TokenResponse)
+@router.post("/auth/verify-otp")
 async def verify_otp(
     request: OTPVerifyRequest,
     auth_service: AuthService = Depends(get_auth_service)
@@ -158,6 +170,7 @@ async def verify_otp(
     """
     Verify OTP and authenticate user
     Endpoint: POST /auth/verify-otp (compatible with existing frontend)
+    Returns AuthResponse format expected by frontend
     """
     try:
         logger.info(f"🔐 OTP verification for: {request.email}")
@@ -186,11 +199,22 @@ async def verify_otp(
         # Create JWT token
         jwt_token = auth_service.create_jwt_token(user_data)
         
-        response = TokenResponse(
-            access_token=jwt_token,
-            token_type="bearer",
-            user=UserResponse(**user)
-        )
+        # Return AuthResponse format expected by frontend
+        response = {
+            'success': True,
+            'message': f'OTP verification successful for {request.email}',
+            'token': jwt_token,
+            'user': {
+                'id': str(user['id']),
+                'email': str(user['email']),
+                'name': str(user.get('name', '')),
+                'picture': str(user.get('profile_image', '')),
+                'verified_email': bool(user.get('verified_email', True))
+            },
+            'expires_in': 3600,  # 1 hour
+            'router_auth': False,  # Modular architecture
+            'isUserExist': True  # User exists after creation/update
+        }
         
         logger.info(f"✅ OTP verification successful for: {request.email}")
         return response
