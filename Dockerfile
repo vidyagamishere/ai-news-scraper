@@ -36,6 +36,7 @@ COPY --from=builder /root/.local /home/appuser/.local
 COPY clean_main.py .
 COPY simple_db_service.py .
 COPY create_ai_sources.py .
+COPY migration_endpoint.py .
 COPY requirements.txt .
 
 # Set proper ownership
