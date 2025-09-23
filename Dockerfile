@@ -32,22 +32,14 @@ RUN apt-get update && apt-get install -y \
 # Copy Python packages from builder stage
 COPY --from=builder /root/.local /home/appuser/.local
 
-# Copy application code and requirements (Railway needs this in runtime)
-# Copy the new modular FastAPI architecture
-COPY app/ /app/app/
-COPY api/ /app/api/
-COPY db_service.py .
-COPY main.py .
-COPY railway_start.py .
-COPY comprehensive_ai_sources.py .
-COPY health_check.py .
+# Copy application code for clean PostgreSQL architecture
+COPY clean_main.py .
+COPY simple_db_service.py .
+COPY create_ai_sources.py .
 COPY requirements.txt .
-COPY .env.production .env
-# Copy existing SQLite database for migration to PostgreSQL
-COPY ai_news.db ./ai_news.db
 
-# Create data directory for SQLite database
-RUN mkdir -p /app/data && chown -R appuser:appuser /app
+# Set proper ownership
+RUN chown -R appuser:appuser /app
 
 # Switch to non-root user
 USER appuser
@@ -58,19 +50,9 @@ ENV PATH=/home/appuser/.local/bin:$PATH
 # Expose port (Railway will set PORT env var)
 EXPOSE 8000
 
-# Health check (Railway will set PORT env var)
+# Health check
 HEALTHCHECK --interval=30s --timeout=30s --start-period=10s --retries=3 \
-    CMD python health_check.py
+    CMD curl -f http://localhost:${PORT:-8000}/health || exit 1
 
-# Run the application with explicit modular FastAPI architecture
-CMD sh -c "echo '=== RAILWAY EXPLICIT MODULAR STARTUP ===' && \
-           echo 'PORT environment variable: $PORT' && \
-           echo 'Using explicit railway_start.py to force modular architecture' && \
-           echo 'Modular structure verification:' && \
-           echo 'Main files:' && ls -la /app/*.py && \
-           echo 'App directory:' && ls -la /app/app/ && \
-           echo 'App routers:' && ls -la /app/app/routers/ && \
-           echo 'Testing railway_start.py import:' && python -c 'import railway_start; print(\"Railway start module imported successfully\")' && \
-           echo 'Testing main module import:' && python -c 'import main; print(\"Main module imported successfully\")' && \
-           echo 'Database service check:' && python -c 'import db_service; print(\"Database service imported successfully\")' && \
-           python railway_start.py"
+# Run the clean PostgreSQL application
+CMD python3 clean_main.py
