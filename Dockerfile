@@ -38,6 +38,7 @@ COPY app/ /app/app/
 COPY api/ /app/api/
 COPY db_service.py .
 COPY main.py .
+COPY railway_start.py .
 COPY comprehensive_ai_sources.py .
 COPY health_check.py .
 COPY requirements.txt .
@@ -61,14 +62,15 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=30s --start-period=10s --retries=3 \
     CMD python health_check.py
 
-# Run the application with modular FastAPI architecture
-CMD sh -c "echo '=== RAILWAY MODULAR STARTUP DEBUG ===' && \
+# Run the application with explicit modular FastAPI architecture
+CMD sh -c "echo '=== RAILWAY EXPLICIT MODULAR STARTUP ===' && \
            echo 'PORT environment variable: $PORT' && \
-           echo 'Project structure verification:' && \
+           echo 'Using explicit railway_start.py to force modular architecture' && \
+           echo 'Modular structure verification:' && \
            echo 'Main files:' && ls -la /app/*.py && \
            echo 'App directory:' && ls -la /app/app/ && \
            echo 'App routers:' && ls -la /app/app/routers/ && \
+           echo 'Testing railway_start.py import:' && python -c 'import railway_start; print(\"Railway start module imported successfully\")' && \
            echo 'Testing main module import:' && python -c 'import main; print(\"Main module imported successfully\")' && \
-           echo 'Testing app.main module import:' && python -c 'from app.main import app; print(\"Modular app imported successfully\")' && \
            echo 'Database service check:' && python -c 'import db_service; print(\"Database service imported successfully\")' && \
-           python main.py"
+           python railway_start.py"
