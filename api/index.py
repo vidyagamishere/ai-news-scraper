@@ -2,23 +2,17 @@
 """
 Vercel serverless function handler for AI News Scraper API
 Uses modular FastAPI architecture with PostgreSQL backend
-Maintains single-function deployment compatibility
+Routes to main.py for Railway compatibility
 """
 
 import os
-from fastapi import Request
+import sys
 
-# Import the modular FastAPI application
-from app.main import app
+# Add parent directory to Python path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Vercel serverless function handler
-async def handler(request: Request):
-    """
-    Vercel serverless function handler that routes to modular FastAPI app
-    This maintains the single-function deployment pattern while using
-    the new modular architecture internally
-    """
-    return await app(request.scope, request.receive, request._send)
+# Import the modular FastAPI application from main.py
+from main import app
 
 # Export for Vercel
 app = app
