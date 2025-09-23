@@ -544,6 +544,17 @@ def get_database_service() -> PostgreSQLService:
         db_service = PostgreSQLService()
     return db_service
 
+def initialize_database():
+    """Initialize the database service and perform migration if needed"""
+    global db_service
+    if db_service is None:
+        db_service = PostgreSQLService()
+        logger.info("✅ Database service initialized successfully")
+    else:
+        logger.info("ℹ️ Database service already initialized")
+    return db_service
+
+
 def close_database_service():
     """Close global database service"""
     global db_service
