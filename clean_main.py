@@ -866,7 +866,7 @@ def get_personalized_articles(user_preferences: dict, limit: int = 20) -> List[d
         
         base_query += """
             GROUP BY a.id, a.title, a.url, a.description, a.source, a.published_at, 
-                     a.category, a.significance_score, a.reading_time, a.content_type
+                     a.category, a.significance_score, a.reading_time, COALESCE(a.content_type, 'blog')
             ORDER BY a.significance_score DESC, a.published_at DESC
             LIMIT %s
         """
@@ -922,56 +922,155 @@ def get_general_articles(limit: int = 20) -> List[dict]:
         logger.error(f"❌ Failed to get general articles: {str(e)}")
         return []
 
-# Digest endpoint with personalization
+# Digest endpoint with personalization (unified, clean implementation)
 @app.get("/digest")
-async def get_digest(current_user: Optional[UserResponse] = Depends(get_current_user_optional)):
+async def get_digest(request: Request):
     """Get news digest - personalized for authenticated users"""
     try:
         logger.info("📊 Digest requested")
+        db = get_database_service()
         
-        # Determine if user is authenticated and has preferences
+        # Check for authentication token
+        current_user = None
         personalized = False
-        articles = []
         
-        if current_user and current_user.preferences:
-            logger.info(f"👤 Personalized digest for: {current_user.email}")
-            articles = get_personalized_articles(current_user.preferences, 50)
-            personalized = True
-        else:
-            logger.info("🌐 General digest for unauthenticated user")
-            articles = get_general_articles(50)
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header.split(" ")[1]
+            try:
+                auth_service = AuthService()
+                payload = auth_service.verify_jwt_token(token)
+                if payload:
+                    # Get user preferences from database
+                    user_query = "SELECT preferences FROM users WHERE email = %s"
+                    user_result = db.execute_query(user_query, (payload.get("email"),))
+                    user_preferences = {}
+                    if user_result and user_result[0].get('preferences'):
+                        if isinstance(user_result[0]['preferences'], str):
+                            user_preferences = json.loads(user_result[0]['preferences'])
+                        else:
+                            user_preferences = user_result[0]['preferences']
+                    
+                    current_user = {"email": payload.get("email"), "preferences": user_preferences}
+                    logger.info(f"👤 Authenticated user: {current_user['email']}")
+            except Exception as e:
+                logger.info(f"🔐 Token verification failed: {str(e)}, proceeding as unauthenticated")
         
-        # Organize articles by content type
+        # Get articles with COALESCE for content_type column fix
+        articles_query = """
+            SELECT a.id, a.source, a.title, a.url, a.published_at, a.description, 
+                   a.significance_score, a.category, a.reading_time, a.image_url,
+                   COALESCE(a.content_type, 'blog') as content_type, a.keywords
+            FROM articles a
+            WHERE a.published_at > NOW() - INTERVAL '7 days'
+        """
+        
+        # Add personalization filters if user has preferences
+        params = []
+        if current_user and current_user.get("preferences"):
+            prefs = current_user["preferences"]
+            topics = prefs.get("topics", [])
+            content_types = prefs.get("content_types", [])
+            
+            if topics or content_types:
+                conditions = []
+                if topics:
+                    # Topic-based filtering using keywords
+                    topic_conditions = []
+                    for topic in topics:
+                        topic_conditions.append("a.keywords ILIKE %s")
+                        params.append(f"%{topic}%")
+                    if topic_conditions:
+                        conditions.append("(" + " OR ".join(topic_conditions) + ")")
+                        
+                if content_types:
+                    placeholders = ','.join(['%s'] * len(content_types))
+                    conditions.append(f"COALESCE(a.content_type, 'blog') IN ({placeholders})")
+                    params.extend(content_types)
+                
+                if conditions:
+                    articles_query += " AND (" + " OR ".join(conditions) + ")"
+                    personalized = True
+        
+        articles_query += " ORDER BY a.significance_score DESC, a.published_at DESC LIMIT 50"
+        
+        articles = db.execute_query(articles_query, tuple(params) if params else None)
+        
+        processed_articles = []
+        for article in articles:
+            article_dict = dict(article)
+            
+            # Convert timestamp to ISO format
+            if article_dict.get('published_at'):
+                article_dict['published_at'] = article_dict['published_at'].isoformat()
+            
+            # Add required frontend fields
+            article_dict['type'] = article_dict.get('content_type', 'blog')
+            article_dict['time'] = format_time_ago(article_dict.get('published_at'))
+            article_dict['impact'] = get_impact_level(article_dict.get('significance_score', 5))
+            article_dict['readTime'] = f"{article_dict.get('reading_time', 3)} min read"
+            article_dict['significanceScore'] = article_dict.get('significance_score', 5)
+            
+            processed_articles.append(article_dict)
+        
+        # Organize by content type for frontend - support all 6 content types
         content_by_type = {
-            'blog': [a for a in articles if a.get('content_type') == 'blog'],
-            'audio': [a for a in articles if a.get('content_type') == 'audio'],
-            'video': [a for a in articles if a.get('content_type') == 'video']
+            'blog': [a for a in processed_articles if a.get('content_type') == 'blog'][:20],
+            'audio': [a for a in processed_articles if a.get('content_type') == 'audio'][:10],
+            'video': [a for a in processed_articles if a.get('content_type') == 'video'][:10],
+            'learning': [a for a in processed_articles if a.get('content_type') == 'learning'][:10],
+            'demos': [a for a in processed_articles if a.get('content_type') == 'demos'][:10],
+            'events': [a for a in processed_articles if a.get('content_type') == 'events'][:10]
         }
         
-        # Top stories (highest significance scores)
-        top_stories = sorted(articles, key=lambda x: x.get('significance_score', 0), reverse=True)[:10]
+        # Get top stories (high significance score)
+        top_stories = sorted(processed_articles, key=lambda x: x.get('significance_score', 0), reverse=True)[:10]
         
         response = {
-            "personalized": personalized,
-            "topStories": top_stories,
-            "content": content_by_type,
-            "summary": {
-                "total_articles": len(articles),
-                "personalization_note": "Showing content based on your preferences" if personalized else "General AI news content",
-                "last_updated": datetime.utcnow().isoformat()
+            'topStories': top_stories,
+            'content': content_by_type,
+            'summary': {
+                'total_articles': len(processed_articles),
+                'top_stories_count': len(top_stories),
+                'personalization_note': "Customized based on your preferences" if personalized else "General AI news content",
+                'last_updated': datetime.utcnow().isoformat(),
+                'keyPoints': [
+                    "Latest AI breakthroughs and developments",
+                    "Comprehensive coverage from leading sources", 
+                    "Personalized content based on preferences" if personalized else "General AI news digest"
+                ],
+                'metrics': {
+                    'totalUpdates': len(processed_articles),
+                    'highImpact': len([a for a in processed_articles if a.get('significance_score', 0) >= 8]),
+                    'newResearch': len([a for a in processed_articles if a.get('category') == 'research']),
+                    'industryMoves': len([a for a in processed_articles if a.get('category') == 'business'])
+                }
             },
-            "database": "postgresql",
-            "version": "4.0.0-clean-postgresql"
+            'personalized': personalized,
+            'database': 'postgresql',
+            'timestamp': datetime.utcnow().isoformat(),
+            'badge': 'Personalized' if personalized else 'Preview',
+            'debug_info': {
+                'user_authenticated': current_user is not None,
+                'personalization_enabled': personalized,
+                'dashboard_mode': 'personalized' if personalized else 'preview',
+                'is_preview_mode': not personalized,
+                'content_type_column_fixed': True
+            }
         }
         
-        logger.info(f"✅ Digest generated - {len(articles)} articles, personalized: {personalized}")
+        logger.info(f"✅ Digest generated - {len(processed_articles)} articles, personalized: {personalized}")
         return response
         
     except Exception as e:
-        logger.error(f"❌ Digest generation failed: {str(e)}")
+        logger.error(f"❌ Digest endpoint failed: {str(e)}")
         raise HTTPException(
             status_code=500,
-            detail={'error': 'Failed to generate digest', 'message': str(e), 'database': 'postgresql'}
+            detail={
+                'error': 'Failed to get digest',
+                'message': str(e),
+                'database': 'postgresql'
+            }
         )
 
 # Manual scraping endpoint
@@ -1372,170 +1471,9 @@ async def get_database_schema():
             }
         )
 
-# Sources endpoint  
-@app.get("/sources")
-async def get_sources():
-    """Get all content sources"""
-    try:
-        db = get_database_service()
-        
-        sources_query = """
-            SELECT name, rss_url, website, content_type, category, priority, enabled
-            FROM ai_sources
-            WHERE enabled = TRUE
-            ORDER BY priority ASC, name ASC
-        """
-        
-        sources = db.execute_query(sources_query)
-        
-        processed_sources = []
-        for source in sources:
-            processed_sources.append({
-                'name': source['name'],
-                'rss_url': source['rss_url'],
-                'website': source.get('website', ''),
-                'content_type': source['content_type'],
-                'category': source.get('category', 'general'),
-                'priority': source['priority'],
-                'enabled': source['enabled']
-            })
-        
-        return {
-            'sources': processed_sources,
-            'total_count': len(processed_sources),
-            'enabled_count': len([s for s in processed_sources if s['enabled']]),
-            'database': 'postgresql'
-        }
-        
-    except Exception as e:
-        logger.error(f"❌ Sources endpoint failed: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail={
-                'error': 'Failed to get sources',
-                'message': str(e),
-                'database': 'postgresql'
-            }
-        )
+# Duplicate sources endpoint removed - keeping the unified implementation above
 
-# Digest endpoint with personalization support
-@app.get("/digest")
-async def get_digest(request: Request):
-    """Get news digest - personalized for authenticated users"""
-    try:
-        logger.info("📊 Digest requested")
-        db = get_database_service()
-        
-        # Check for authentication token
-        current_user = None
-        personalized = False
-        
-        auth_header = request.headers.get("authorization", "")
-        if auth_header.startswith("Bearer "):
-            token = auth_header.split(" ")[1]
-            try:
-                auth_service = AuthService()
-                payload = auth_service.verify_jwt_token(token)
-                current_user = {"email": payload.get("email"), "preferences": payload.get("preferences", {})}
-                logger.info(f"👤 Authenticated user: {current_user['email']}")
-            except:
-                logger.info("🔐 Invalid token, proceeding as unauthenticated")
-        
-        # Get articles with personalization if user is authenticated
-        articles_query = """
-            SELECT a.id, a.source, a.title, a.url, a.published_at, a.description, 
-                   a.significance_score, a.category, a.reading_time, a.image_url,
-                   COALESCE(a.content_type, 'blog') as content_type, a.keywords
-            FROM articles a
-            WHERE a.published_at > NOW() - INTERVAL '7 days'
-        """
-        
-        # Add personalization filters if user has preferences
-        params = []
-        if current_user and current_user.get("preferences"):
-            prefs = current_user["preferences"]
-            topics = prefs.get("topics", [])
-            content_types = prefs.get("content_types", [])
-            
-            if topics or content_types:
-                conditions = []
-                if topics:
-                    placeholders = ','.join(['%s'] * len(topics))
-                    conditions.append(f"(a.keywords ILIKE ANY(ARRAY[{','.join(['%' + t + '%' for t in topics])}]))")
-                if content_types:
-                    placeholders = ','.join(['%s'] * len(content_types))
-                    conditions.append(f"COALESCE(a.content_type, 'blog') IN ({placeholders})")
-                    params.extend(content_types)
-                
-                if conditions:
-                    articles_query += " AND (" + " OR ".join(conditions) + ")"
-                    personalized = True
-        
-        articles_query += " ORDER BY a.significance_score DESC, a.published_at DESC LIMIT 50"
-        
-        articles = db.execute_query(articles_query, tuple(params) if params else None)
-        
-        processed_articles = []
-        for article in articles:
-            article_dict = dict(article)
-            
-            # Convert timestamp to ISO format
-            if article_dict.get('published_at'):
-                article_dict['published_at'] = article_dict['published_at'].isoformat()
-            
-            # Add required frontend fields
-            article_dict['type'] = article_dict.get('content_type', 'blog')
-            article_dict['time'] = format_time_ago(article_dict.get('published_at'))
-            article_dict['impact'] = get_impact_level(article_dict.get('significance_score', 5))
-            article_dict['readTime'] = f"{article_dict.get('reading_time', 3)} min read"
-            article_dict['significanceScore'] = article_dict.get('significance_score', 5)
-            
-            processed_articles.append(article_dict)
-        
-        # Organize by content type for frontend
-        content_by_type = {
-            'blog': [a for a in processed_articles if a.get('content_type') == 'blog'][:20],
-            'audio': [a for a in processed_articles if a.get('content_type') == 'audio'][:10],
-            'video': [a for a in processed_articles if a.get('content_type') == 'video'][:10],
-            'learning': [a for a in processed_articles if a.get('content_type') == 'learning'][:10],
-            'demos': [a for a in processed_articles if a.get('content_type') == 'demos'][:10],
-            'events': [a for a in processed_articles if a.get('content_type') == 'events'][:10]
-        }
-        
-        # Get top stories (high significance score)
-        top_stories = sorted(processed_articles, key=lambda x: x.get('significance_score', 0), reverse=True)[:10]
-        
-        response = {
-            'topStories': top_stories,
-            'content': content_by_type,
-            'summary': {
-                'total_articles': len(processed_articles),
-                'top_stories_count': len(top_stories),
-                'personalization_note': "Customized based on your preferences" if personalized else "General AI news content",
-                'last_updated': datetime.utcnow().isoformat()
-            },
-            'personalized': personalized,
-            'database': 'postgresql',
-            'debug_info': {
-                'user_authenticated': current_user is not None,
-                'personalization_enabled': personalized,
-                'dashboard_mode': 'personalized' if personalized else 'preview'
-            }
-        }
-        
-        logger.info(f"✅ Digest generated - {len(processed_articles)} articles, personalized: {personalized}")
-        return response
-        
-    except Exception as e:
-        logger.error(f"❌ Digest endpoint failed: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail={
-                'error': 'Failed to get digest',
-                'message': str(e),
-                'database': 'postgresql'
-            }
-        )
+# Duplicate digest endpoint removed - keeping the unified implementation above
 
 # Personalized digest endpoint
 @app.get("/personalized-digest")
@@ -2064,108 +2002,7 @@ async def get_archive(limit: int = 50):
             detail={'error': 'Failed to get archive', 'message': str(e)}
         )
 
-# Topics endpoint for frontend compatibility
-@app.get("/topics")
-async def get_topics():
-    """Get available AI topics for user preferences"""
-    try:
-        logger.info("📋 Topics requested")
-        
-        # Predefined AI topics that match frontend expectations
-        ai_topics = [
-            {"id": "ml_foundations", "name": "Machine Learning", "category": "research"},
-            {"id": "deep_learning", "name": "Deep Learning", "category": "research"},
-            {"id": "nlp_llm", "name": "NLP & Large Language Models", "category": "research"},
-            {"id": "computer_vision", "name": "Computer Vision", "category": "research"},
-            {"id": "robotics", "name": "Robotics & Automation", "category": "robotics"},
-            {"id": "ai_ethics", "name": "AI Ethics & Safety", "category": "ethics"},
-            {"id": "ai_business", "name": "AI in Business", "category": "business"},
-            {"id": "ai_tools", "name": "AI Tools & Platforms", "category": "platform"},
-            {"id": "ai_research", "name": "AI Research", "category": "research"},
-            {"id": "ai_healthcare", "name": "AI in Healthcare", "category": "healthcare"},
-            {"id": "ai_automotive", "name": "AI in Automotive", "category": "automotive"},
-            {"id": "generative_ai", "name": "Generative AI", "category": "research"},
-            {"id": "ai_hardware", "name": "AI Hardware", "category": "hardware"},
-            {"id": "ai_startups", "name": "AI Startups", "category": "business"},
-            {"id": "ai_education", "name": "AI Education", "category": "education"}
-        ]
-        
-        # Group by category
-        topics_by_category = {}
-        for topic in ai_topics:
-            category = topic["category"]
-            if category not in topics_by_category:
-                topics_by_category[category] = []
-            topics_by_category[category].append(topic)
-        
-        return {
-            "topics": ai_topics,
-            "topics_by_category": topics_by_category,
-            "total_count": len(ai_topics),
-            "categories": list(topics_by_category.keys()),
-            "database": "postgresql"
-        }
-        
-    except Exception as e:
-        logger.error(f"❌ Topics endpoint failed: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail={'error': 'Failed to get topics', 'message': str(e)}
-        )
-
-# Content types endpoint for frontend compatibility
-@app.get("/content-types")
-async def get_content_types():
-    """Get available content types"""
-    try:
-        logger.info("📊 Content types requested")
-        
-        content_types = {
-            "blogs": {
-                "name": "Blog Articles",
-                "description": "Technical articles and blog posts",
-                "enabled": True
-            },
-            "podcasts": {
-                "name": "Podcasts & Audio",
-                "description": "AI podcasts and audio content",
-                "enabled": True
-            },
-            "videos": {
-                "name": "Videos",
-                "description": "YouTube videos and video tutorials",
-                "enabled": True
-            },
-            "learning": {
-                "name": "Learning Resources",
-                "description": "Courses, tutorials, and educational content",
-                "enabled": True
-            },
-            "demos": {
-                "name": "Demos & Tools",
-                "description": "Interactive demos and AI tools",
-                "enabled": True
-            },
-            "events": {
-                "name": "Events & Conferences",
-                "description": "AI conferences, webinars, and events",
-                "enabled": True
-            }
-        }
-        
-        return {
-            "content_types": content_types,
-            "enabled_types": [k for k, v in content_types.items() if v["enabled"]],
-            "total_count": len(content_types),
-            "database": "postgresql"
-        }
-        
-    except Exception as e:
-        logger.error(f"❌ Content types endpoint failed: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail={'error': 'Failed to get content types', 'message': str(e)}
-        )
+# Duplicate topics and content-types endpoints removed - keeping the unified implementations above
 
 # Root endpoint
 @app.get("/")
