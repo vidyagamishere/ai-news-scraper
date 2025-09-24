@@ -83,8 +83,9 @@ async def google_auth(
         # Create or update user in PostgreSQL
         user = auth_service.create_or_update_user(user_data)
         
-        # Create JWT token
-        jwt_token = auth_service.create_jwt_token(user_data)
+        # Create JWT token with user data including admin flag
+        user_data_with_admin = {**user_data, 'is_admin': user.get('is_admin', False)}
+        jwt_token = auth_service.create_jwt_token(user_data_with_admin)
         
         # Return AuthResponse format expected by frontend
         response = {
@@ -96,7 +97,8 @@ async def google_auth(
                 'email': str(user['email']),
                 'name': str(user.get('name', '')),
                 'picture': str(user.get('profile_image', user_data.get('picture', ''))),
-                'verified_email': bool(user.get('verified_email', True))
+                'verified_email': bool(user.get('verified_email', True)),
+                'is_admin': bool(user.get('is_admin', False))
             },
             'expires_in': 3600,  # 1 hour
             'router_auth': False,  # Modular architecture

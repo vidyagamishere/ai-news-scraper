@@ -41,6 +41,7 @@ class AuthService:
                 "email": user_data.get('email', ''),
                 "name": user_data.get('name', ''),
                 "picture": user_data.get('picture', ''),
+                "is_admin": user_data.get('is_admin', False),
                 "iat": int(datetime.utcnow().timestamp()),
                 "exp": int((datetime.utcnow() + timedelta(hours=24)).timestamp())
             }
@@ -212,6 +213,13 @@ class AuthService:
                         user_dict['preferences'] = json.loads(user_dict['preferences'])
                 else:
                     user_dict['preferences'] = {}
+                
+                # Check if this is an admin user
+                is_admin = user_dict.get('email') == 'admin@vidyagam.com'
+                user_dict['is_admin'] = is_admin
+                
+                if is_admin:
+                    logger.info(f"🔑 Admin user detected: {user_dict.get('email')}")
                 
                 return user_dict
             else:
