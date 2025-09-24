@@ -27,6 +27,47 @@ router = APIRouter()
 # OTP storage (in production, use Redis or database)
 otp_storage = {}
 
+
+@router.get("/auth/env-debug")
+async def debug_environment():
+    """
+    Debug endpoint to check environment variables (admin only)
+    """
+    try:
+        # Check various environment variables
+        env_check = {
+            'BREVO_API_KEY': bool(os.getenv('BREVO_API_KEY')),
+            'JWT_SECRET': bool(os.getenv('JWT_SECRET')),
+            'GOOGLE_CLIENT_ID': bool(os.getenv('GOOGLE_CLIENT_ID')),
+            'POSTGRES_URL': bool(os.getenv('POSTGRES_URL')),
+            'ALLOWED_ORIGINS': bool(os.getenv('ALLOWED_ORIGINS')),
+        }
+        
+        # Check specific Brevo key details
+        brevo_key = os.getenv('BREVO_API_KEY', '')
+        brevo_info = {
+            'exists': bool(brevo_key),
+            'length': len(brevo_key) if brevo_key else 0,
+            'starts_with_xkeysib': brevo_key.startswith('xkeysib-') if brevo_key else False
+        }
+        
+        logger.info("🔍 Environment variables debug check requested")
+        
+        return {
+            'success': True,
+            'environment_check': env_check,
+            'brevo_details': brevo_info,
+            'note': 'This endpoint helps debug environment variable configuration'
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Environment debug failed: {str(e)}")
+        return {
+            'success': False,
+            'error': str(e),
+            'note': 'Environment debug endpoint error'
+        }
+
 def generate_otp() -> str:
     """Generate a 6-digit OTP"""
     return ''.join(random.choices(string.digits, k=6))
