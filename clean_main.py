@@ -357,11 +357,11 @@ async def scrape_content_from_sources():
                             'created_at': datetime.utcnow()
                         }
                         
-                        # Insert into articles table (avoid duplicates by URL)
+                        # Insert into articles table with content_type (avoid duplicates by URL)
                         insert_query = """
                             INSERT INTO articles (title, url, description, source, published_at, category, 
-                                                significance_score, reading_time, created_at)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                                content_type, significance_score, reading_time, created_at)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                             ON CONFLICT (url) DO NOTHING
                         """
                         
@@ -374,6 +374,7 @@ async def scrape_content_from_sources():
                                 article_data['source'],
                                 article_data['published_at'],
                                 article_data['category'],
+                                article_data['content_type'],  # Add content_type
                                 article_data['significance_score'],
                                 article_data['reading_time'],
                                 article_data['created_at']
