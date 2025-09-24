@@ -2003,6 +2003,87 @@ async def get_archive(limit: int = 50):
             detail={'error': 'Failed to get archive', 'message': str(e)}
         )
 
+# Admin endpoint to update RSS sources
+@app.post("/admin/update-sources")
+async def update_rss_sources(request: Request):
+    """Update RSS sources with working URLs - admin endpoint"""
+    try:
+        logger.info("🔧 Admin RSS sources update requested")
+        db = get_database_service()
+        
+        # Simple admin key check
+        admin_key = request.headers.get("x-admin-key", "")
+        if admin_key != "update-sources-2025":
+            raise HTTPException(status_code=403, detail="Unauthorized")
+        
+        # Clear existing sources and add working ones
+        logger.info("🧹 Clearing existing sources...")
+        db.execute_query("DELETE FROM ai_sources;")
+        
+        # Insert working AI sources with correct RSS feeds
+        logger.info("📚 Inserting working AI news sources...")
+        sources = [
+            # High-priority research sources
+            ("OpenAI Blog", "https://openai.com/blog/rss.xml", "https://openai.com", "blogs", "research", True, 1, "Official OpenAI blog and announcements"),
+            ("MIT Technology Review AI", "https://www.technologyreview.com/topic/artificial-intelligence/feed/", "https://www.technologyreview.com", "blogs", "research", True, 1, "MIT Technology Review AI coverage"),
+            ("VentureBeat AI", "https://venturebeat.com/ai/feed/", "https://venturebeat.com", "blogs", "business", True, 1, "AI business news and trends"),
+            ("TechCrunch AI", "https://techcrunch.com/category/artificial-intelligence/feed/", "https://techcrunch.com", "blogs", "business", True, 1, "AI startup and business news"),
+            ("Towards Data Science", "https://towardsdatascience.com/feed", "https://towardsdatascience.com", "blogs", "technical", True, 2, "Data science and ML tutorials"),
+            ("AI News", "https://www.artificialintelligence-news.com/feed/", "https://www.artificialintelligence-news.com", "blogs", "technical", True, 2, "AI industry news and analysis"),
+            ("Machine Learning Mastery", "https://machinelearningmastery.com/feed/", "https://machinelearningmastery.com", "blogs", "education", True, 2, "ML tutorials and guides"),
+            
+            # Podcast sources
+            ("Lex Fridman Podcast", "https://lexfridman.com/feed/podcast/", "https://lexfridman.com", "podcasts", "education", True, 1, "Long-form conversations about AI"),
+            ("AI Podcast by NVIDIA", "https://feeds.soundcloud.com/users/soundcloud:users:264034133/sounds.rss", "https://blogs.nvidia.com", "podcasts", "technical", True, 2, "NVIDIA AI discussions"),
+            
+            # Video sources (YouTube RSS)
+            ("Two Minute Papers", "https://www.youtube.com/feeds/videos.xml?channel_id=UCbfYPyITQ-7l4upoX8nvctg", "https://www.youtube.com/channel/UCbfYPyITQ-7l4upoX8nvctg", "videos", "education", True, 1, "AI research paper explanations"),
+            ("AI Explained", "https://www.youtube.com/feeds/videos.xml?channel_id=UCNJ1Ymd5yFuUPtn21xtRbbw", "https://www.youtube.com/channel/UCNJ1Ymd5yFuUPtn21xtRbbw", "videos", "education", True, 2, "AI concepts explained"),
+            ("Yannic Kilcher", "https://www.youtube.com/feeds/videos.xml?channel_id=UCZHmQk67mSJgfCCTn7xBfew", "https://www.youtube.com/channel/UCZHmQk67mSJgfCCTn7xBfew", "videos", "research", True, 2, "AI research and paper discussions"),
+            
+            # News aggregators
+            ("Google AI Blog", "https://ai.googleblog.com/feeds/posts/default", "https://ai.googleblog.com", "blogs", "research", True, 1, "Google AI research and developments"),
+            ("The Verge AI", "https://www.theverge.com/ai-artificial-intelligence/rss/index.xml", "https://www.theverge.com", "blogs", "business", True, 2, "Consumer AI technology news"),
+            ("Wired AI", "https://www.wired.com/feed/category/business/artificial-intelligence/latest/rss", "https://www.wired.com", "blogs", "business", True, 2, "AI technology and society coverage"),
+            
+            # Learning resources
+            ("Distill", "https://distill.pub/rss.xml", "https://distill.pub", "learning", "research", True, 1, "Visual explanations of ML concepts"),
+            ("Papers With Code Blog", "https://paperswithcode.com/feed.xml", "https://paperswithcode.com", "learning", "research", True, 2, "Latest ML papers and implementations"),
+        ]
+        
+        for source in sources:
+            db.execute_query("""
+                INSERT INTO ai_sources (name, rss_url, website, content_type, category, enabled, priority, description)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """, source)
+        
+        # Create indexes
+        logger.info("🔗 Creating indexes...")
+        db.execute_query("CREATE INDEX IF NOT EXISTS idx_ai_sources_enabled ON ai_sources(enabled);")
+        db.execute_query("CREATE INDEX IF NOT EXISTS idx_ai_sources_priority ON ai_sources(priority);")
+        db.execute_query("CREATE INDEX IF NOT EXISTS idx_ai_sources_category ON ai_sources(category);")
+        db.execute_query("CREATE INDEX IF NOT EXISTS idx_ai_sources_content_type ON ai_sources(content_type);")
+        
+        # Get count
+        count_result = db.execute_query("SELECT COUNT(*) as count FROM ai_sources WHERE enabled = TRUE;")
+        count = count_result[0]['count'] if count_result else 0
+        
+        logger.info(f"✅ RSS sources updated successfully with {count} enabled sources")
+        
+        return {
+            'success': True,
+            'message': f'RSS sources updated successfully with {count} working sources',
+            'sources_updated': count,
+            'database': 'postgresql'
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to update RSS sources: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={'error': 'Failed to update sources', 'message': str(e)}
+        )
+
 # Duplicate topics and content-types endpoints removed - keeping the unified implementations above
 
 # Root endpoint
