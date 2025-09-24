@@ -2064,9 +2064,13 @@ async def update_rss_sources(request: Request):
         db.execute_query("CREATE INDEX IF NOT EXISTS idx_ai_sources_category ON ai_sources(category);")
         db.execute_query("CREATE INDEX IF NOT EXISTS idx_ai_sources_content_type ON ai_sources(content_type);")
         
-        # Get count
-        count_result = db.execute_query("SELECT COUNT(*) as count FROM ai_sources WHERE enabled = TRUE;")
-        count = count_result[0]['count'] if count_result else 0
+        # Get count - with error handling
+        try:
+            count_result = db.execute_query("SELECT COUNT(*) as count FROM ai_sources WHERE enabled = TRUE;")
+            count = count_result[0]['count'] if count_result and len(count_result) > 0 else len(sources)
+        except Exception as count_error:
+            logger.warning(f"Count query failed: {str(count_error)}, using fallback count")
+            count = len(sources)
         
         logger.info(f"✅ RSS sources updated successfully with {count} enabled sources")
         
