@@ -35,8 +35,10 @@ def send_otp_email(email: str, otp: str, name: str = "") -> bool:
     """Send OTP via email using Brevo API (same as admin interface)"""
     try:
         brevo_api_key = os.getenv('BREVO_API_KEY', '')
+        logger.info(f"🔑 Brevo API key check: {'✅ Found' if brevo_api_key else '❌ Not found'}")
+        
         if not brevo_api_key:
-            logger.warning("⚠️ BREVO_API_KEY not set, using fallback mode")
+            logger.warning("⚠️ BREVO_API_KEY not set in environment, using fallback mode")
             return False
         
         # Use Brevo API for sending email
@@ -94,12 +96,15 @@ def send_otp_email(email: str, otp: str, name: str = "") -> bool:
             """
         }
         
+        logger.info(f"📧 Attempting to send OTP email to {email} via Brevo API")
         response = requests.post(url, headers=headers, json=data, timeout=10)
+        
+        logger.info(f"📊 Brevo API response: {response.status_code}")
         if response.status_code == 201:
-            logger.info(f"✅ OTP email sent successfully to {email}")
+            logger.info(f"✅ OTP email sent successfully to {email} via Brevo")
             return True
         else:
-            logger.error(f"❌ Failed to send OTP email: {response.status_code} - {response.text}")
+            logger.error(f"❌ Brevo API failed: {response.status_code} - {response.text[:200]}")
             return False
             
     except Exception as e:
