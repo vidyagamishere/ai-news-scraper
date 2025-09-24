@@ -499,7 +499,23 @@ allowed_origins = [
     "http://localhost:5173",
     "https://ai-news-react.vercel.app",
     "https://www.vidyagam.com",
+    # Allow all Vercel deployment URLs for ai-news-react
+    "https://ai-news-react-*.vercel.app",
 ]
+
+# Function to check if origin matches allowed patterns
+def is_origin_allowed(origin: str) -> bool:
+    """Check if origin is allowed including wildcard patterns"""
+    for allowed in allowed_origins:
+        if '*' in allowed:
+            # Convert wildcard pattern to regex
+            pattern = allowed.replace('*', '.*')
+            import re
+            if re.match(f"^{pattern}$", origin):
+                return True
+        elif origin == allowed:
+            return True
+    return False
 
 # Add environment origins
 env_origins = os.getenv('ALLOWED_ORIGINS', '')
@@ -816,7 +832,8 @@ def get_personalized_articles(user_preferences: dict, limit: int = 20) -> List[d
         # Base query for articles
         base_query = """
             SELECT DISTINCT a.id, a.title, a.url, a.description, a.source, a.published_at, 
-                   a.category, a.significance_score, a.reading_time, a.content_type,
+                   a.category, a.significance_score, a.reading_time, 
+                   COALESCE(a.content_type, 'blog') as content_type,
                    array_agg(DISTINCT t.name) as topics
             FROM articles a
             LEFT JOIN article_topics at ON a.id = at.article_id
@@ -840,7 +857,7 @@ def get_personalized_articles(user_preferences: dict, limit: int = 20) -> List[d
         if user_content_types and len(user_content_types) > 0:
             # Filter by user's selected content types
             placeholders = ','.join(['%s'] * len(user_content_types))
-            conditions.append(f"a.content_type IN ({placeholders})")
+            conditions.append(f"COALESCE(a.content_type, 'blog') IN ({placeholders})")
             params.extend(user_content_types)
         
         # Build final query
@@ -882,7 +899,8 @@ def get_general_articles(limit: int = 20) -> List[dict]:
         
         query = """
             SELECT a.id, a.title, a.url, a.description, a.source, a.published_at, 
-                   a.category, a.significance_score, a.reading_time, a.content_type
+                   a.category, a.significance_score, a.reading_time, 
+                   COALESCE(a.content_type, 'blog') as content_type
             FROM articles a
             WHERE a.published_at >= (CURRENT_DATE - INTERVAL '7 days')
             ORDER BY a.significance_score DESC, a.published_at DESC
@@ -1039,9 +1057,10 @@ async def get_audio_content(hours: int = 24, limit: int = 20):
         
         query = """
             SELECT id, title, url, description, source, published_at, 
-                   significance_score, reading_time, content_type
+                   significance_score, reading_time, 
+                   COALESCE(content_type, 'audio') as content_type
             FROM articles 
-            WHERE content_type = 'audio' 
+            WHERE COALESCE(content_type, 'audio') = 'audio' 
             AND published_at >= (CURRENT_TIMESTAMP - INTERVAL '%s hours')
             ORDER BY significance_score DESC, published_at DESC
             LIMIT %s
@@ -1089,9 +1108,10 @@ async def get_video_content(hours: int = 24, limit: int = 20):
         
         query = """
             SELECT id, title, url, description, source, published_at, 
-                   significance_score, reading_time, content_type
+                   significance_score, reading_time, 
+                   COALESCE(content_type, 'video') as content_type
             FROM articles 
-            WHERE content_type = 'video' 
+            WHERE COALESCE(content_type, 'video') = 'video' 
             AND published_at >= (CURRENT_TIMESTAMP - INTERVAL '%s hours')
             ORDER BY significance_score DESC, published_at DESC
             LIMIT %s
@@ -1238,9 +1258,10 @@ async def get_content_by_type(content_type: str, limit: int = 20):
         
         query = """
             SELECT id, title, url, description, source, published_at, 
-                   category, significance_score, reading_time, content_type
+                   category, significance_score, reading_time, 
+                   COALESCE(content_type, 'blog') as content_type
             FROM articles 
-            WHERE content_type = %s 
+            WHERE COALESCE(content_type, 'blog') = %s 
             AND published_at >= (CURRENT_DATE - INTERVAL '7 days')
             ORDER BY significance_score DESC, published_at DESC
             LIMIT %s
@@ -1413,7 +1434,8 @@ async def get_digest(request: Request):
         if auth_header.startswith("Bearer "):
             token = auth_header.split(" ")[1]
             try:
-                payload = verify_jwt_token(token)
+                auth_service = AuthService()
+                payload = auth_service.verify_jwt_token(token)
                 current_user = {"email": payload.get("email"), "preferences": payload.get("preferences", {})}
                 logger.info(f"👤 Authenticated user: {current_user['email']}")
             except:
@@ -1423,7 +1445,7 @@ async def get_digest(request: Request):
         articles_query = """
             SELECT a.id, a.source, a.title, a.url, a.published_at, a.description, 
                    a.significance_score, a.category, a.reading_time, a.image_url,
-                   a.content_type, a.keywords
+                   COALESCE(a.content_type, 'blog') as content_type, a.keywords
             FROM articles a
             WHERE a.published_at > NOW() - INTERVAL '7 days'
         """
@@ -1442,7 +1464,7 @@ async def get_digest(request: Request):
                     conditions.append(f"(a.keywords ILIKE ANY(ARRAY[{','.join(['%' + t + '%' for t in topics])}]))")
                 if content_types:
                     placeholders = ','.join(['%s'] * len(content_types))
-                    conditions.append(f"a.content_type IN ({placeholders})")
+                    conditions.append(f"COALESCE(a.content_type, 'blog') IN ({placeholders})")
                     params.extend(content_types)
                 
                 if conditions:
@@ -1526,7 +1548,8 @@ async def get_personalized_digest(request: Request):
             raise HTTPException(status_code=401, detail="Authentication required")
         
         token = auth_header.split(" ")[1]
-        payload = verify_jwt_token(token)
+        auth_service = AuthService()
+        payload = auth_service.verify_jwt_token(token)
         user_email = payload.get("email")
         
         logger.info(f"👤 Personalized digest for: {user_email}")
@@ -1622,7 +1645,8 @@ def get_personalized_articles(user_preferences: dict, limit: int = 20) -> List[d
         
         base_query = """
             SELECT id, title, url, description, source, published_at, 
-                   category, significance_score, reading_time, content_type, keywords
+                   category, significance_score, reading_time, 
+                   COALESCE(content_type, 'blog') as content_type, keywords
             FROM articles
             WHERE published_at >= (CURRENT_DATE - INTERVAL '7 days')
         """
@@ -1644,7 +1668,7 @@ def get_personalized_articles(user_preferences: dict, limit: int = 20) -> List[d
         
         if user_content_types:
             placeholders = ','.join(['%s'] * len(user_content_types))
-            conditions.append(f"content_type IN ({placeholders})")
+            conditions.append(f"COALESCE(content_type, 'blog') IN ({placeholders})")
             params.extend(user_content_types)
         
         if conditions:
@@ -1701,95 +1725,7 @@ async def manual_scrape():
             detail={'error': 'Scraping failed', 'message': str(e), 'database': 'postgresql'}
         )
 
-# Multimedia endpoints for frontend compatibility
-@app.get("/multimedia/audio")
-async def get_audio_content(hours: int = 24, limit: int = 20):
-    """Get recent audio/podcast content"""
-    try:
-        db = get_database_service()
-        
-        query = """
-            SELECT id, title, url, description, source, published_at, 
-                   significance_score, reading_time, content_type
-            FROM articles 
-            WHERE content_type = 'audio' 
-            AND published_at >= (CURRENT_TIMESTAMP - INTERVAL '%s hours')
-            ORDER BY significance_score DESC, published_at DESC
-            LIMIT %s
-        """
-        
-        articles = db.execute_query(query, (hours, limit))
-        
-        audio_content = []
-        for article in articles:
-            audio_item = dict(article)
-            # Add frontend-compatible fields
-            audio_item['type'] = 'audio'
-            audio_item['time'] = format_time_ago(audio_item.get('published_at'))
-            audio_item['impact'] = get_impact_level(audio_item.get('significance_score', 5))
-            audio_item['duration'] = audio_item.get('reading_time', 30) * 60  # Convert to seconds
-            if audio_item.get('published_at'):
-                audio_item['published_date'] = audio_item['published_at'].isoformat()
-            audio_content.append(audio_item)
-        
-        return {
-            "audio_content": audio_content,
-            "total_count": len(audio_content),
-            "hours_range": hours,
-            "database": "postgresql"
-        }
-        
-    except Exception as e:
-        logger.error(f"❌ Audio content endpoint failed: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail={'error': 'Failed to get audio content', 'message': str(e)}
-        )
-
-@app.get("/multimedia/video")
-async def get_video_content(hours: int = 24, limit: int = 20):
-    """Get recent video content"""
-    try:
-        db = get_database_service()
-        
-        query = """
-            SELECT id, title, url, description, source, published_at, 
-                   significance_score, reading_time, content_type, image_url
-            FROM articles 
-            WHERE content_type = 'video' 
-            AND published_at >= (CURRENT_TIMESTAMP - INTERVAL '%s hours')
-            ORDER BY significance_score DESC, published_at DESC
-            LIMIT %s
-        """
-        
-        articles = db.execute_query(query, (hours, limit))
-        
-        video_content = []
-        for article in articles:
-            video_item = dict(article)
-            # Add frontend-compatible fields
-            video_item['type'] = 'video'
-            video_item['time'] = format_time_ago(video_item.get('published_at'))
-            video_item['impact'] = get_impact_level(video_item.get('significance_score', 5))
-            video_item['thumbnail_url'] = video_item.get('image_url', '')
-            video_item['duration'] = 0  # YouTube API would provide this
-            if video_item.get('published_at'):
-                video_item['published_date'] = video_item['published_at'].isoformat()
-            video_content.append(video_item)
-        
-        return {
-            "video_content": video_content,
-            "total_count": len(video_content),
-            "hours_range": hours,
-            "database": "postgresql"
-        }
-        
-    except Exception as e:
-        logger.error(f"❌ Video content endpoint failed: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail={'error': 'Failed to get video content', 'message': str(e)}
-        )
+# Duplicate multimedia endpoints removed - using the ones above
 
 @app.get("/multimedia/sources")
 async def get_multimedia_sources():
@@ -1886,9 +1822,10 @@ async def get_content_by_type(content_type: str, limit: int = 20):
         
         query = """
             SELECT id, title, url, description, source, published_at, 
-                   significance_score, reading_time, content_type, category, image_url
+                   significance_score, reading_time, 
+                   COALESCE(content_type, 'blog') as content_type, category, image_url
             FROM articles 
-            WHERE content_type = %s
+            WHERE COALESCE(content_type, 'blog') = %s
             AND published_at >= (CURRENT_DATE - INTERVAL '30 days')
             ORDER BY significance_score DESC, published_at DESC
             LIMIT %s
@@ -2006,10 +1943,10 @@ async def get_database_info():
         
         # Get recent articles by content type
         content_type_query = """
-            SELECT content_type, COUNT(*) as count
+            SELECT COALESCE(content_type, 'blog') as content_type, COUNT(*) as count
             FROM articles
             WHERE published_at >= (CURRENT_DATE - INTERVAL '30 days')
-            GROUP BY content_type
+            GROUP BY COALESCE(content_type, 'blog')
             ORDER BY count DESC
         """
         
