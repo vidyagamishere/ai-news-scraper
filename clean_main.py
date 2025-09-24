@@ -834,7 +834,17 @@ def get_personalized_articles(user_preferences: dict, limit: int = 20) -> List[d
         base_query = """
             SELECT DISTINCT a.id, a.title, a.url, a.description, a.source, a.published_at, 
                    a.category, a.significance_score, a.reading_time, 
-                   COALESCE(a.content_type, 'blog') as content_type,
+                   COALESCE(
+                       CASE 
+                           WHEN a.content_type_id = 1 THEN 'blog'
+                           WHEN a.content_type_id = 2 THEN 'audio'
+                           WHEN a.content_type_id = 3 THEN 'video'
+                           WHEN a.content_type_id = 4 THEN 'learning'
+                           WHEN a.content_type_id = 5 THEN 'demos'
+                           WHEN a.content_type_id = 6 THEN 'events'
+                           ELSE 'blog'
+                       END, 'blog'
+                   ) as content_type,
                    array_agg(DISTINCT t.name) as topics
             FROM articles a
             LEFT JOIN article_topics at ON a.id = at.article_id
@@ -858,7 +868,7 @@ def get_personalized_articles(user_preferences: dict, limit: int = 20) -> List[d
         if user_content_types and len(user_content_types) > 0:
             # Filter by user's selected content types
             placeholders = ','.join(['%s'] * len(user_content_types))
-            conditions.append(f"COALESCE(a.content_type, 'blog') IN ({placeholders})")
+            conditions.append(f"COALESCE(CASE WHEN a.content_type_id = 1 THEN 'blog' WHEN a.content_type_id = 2 THEN 'audio' WHEN a.content_type_id = 3 THEN 'video' WHEN a.content_type_id = 4 THEN 'learning' WHEN a.content_type_id = 5 THEN 'demos' WHEN a.content_type_id = 6 THEN 'events' ELSE 'blog' END, 'blog') IN ({placeholders})")
             params.extend(user_content_types)
         
         # Build final query
@@ -867,7 +877,7 @@ def get_personalized_articles(user_preferences: dict, limit: int = 20) -> List[d
         
         base_query += """
             GROUP BY a.id, a.title, a.url, a.description, a.source, a.published_at, 
-                     a.category, a.significance_score, a.reading_time, COALESCE(a.content_type, 'blog')
+                     a.category, a.significance_score, a.reading_time, COALESCE(CASE WHEN a.content_type_id = 1 THEN 'blog' WHEN a.content_type_id = 2 THEN 'audio' WHEN a.content_type_id = 3 THEN 'video' WHEN a.content_type_id = 4 THEN 'learning' WHEN a.content_type_id = 5 THEN 'demos' WHEN a.content_type_id = 6 THEN 'events' ELSE 'blog' END, 'blog')
             ORDER BY a.significance_score DESC, a.published_at DESC
             LIMIT %s
         """
@@ -901,7 +911,17 @@ def get_general_articles(limit: int = 20) -> List[dict]:
         query = """
             SELECT a.id, a.title, a.url, a.description, a.source, a.published_at, 
                    a.category, a.significance_score, a.reading_time, 
-                   COALESCE(a.content_type, 'blog') as content_type
+                   COALESCE(
+                       CASE 
+                           WHEN a.content_type_id = 1 THEN 'blog'
+                           WHEN a.content_type_id = 2 THEN 'audio'
+                           WHEN a.content_type_id = 3 THEN 'video'
+                           WHEN a.content_type_id = 4 THEN 'learning'
+                           WHEN a.content_type_id = 5 THEN 'demos'
+                           WHEN a.content_type_id = 6 THEN 'events'
+                           ELSE 'blog'
+                       END, 'blog'
+                   ) as content_type
             FROM articles a
             WHERE a.published_at >= (CURRENT_DATE - INTERVAL '7 days')
             ORDER BY a.significance_score DESC, a.published_at DESC
@@ -957,11 +977,21 @@ async def get_digest(request: Request):
             except Exception as e:
                 logger.info(f"🔐 Token verification failed: {str(e)}, proceeding as unauthenticated")
         
-        # Get articles with COALESCE for content_type column fix
+        # Get articles with COALESCE for content_type_id column fix
         articles_query = """
             SELECT a.id, a.source, a.title, a.url, a.published_at, a.description, 
                    a.significance_score, a.category, a.reading_time, a.image_url,
-                   COALESCE(a.content_type, 'blog') as content_type, a.keywords
+                   COALESCE(
+                       CASE 
+                           WHEN a.content_type_id = 1 THEN 'blog'
+                           WHEN a.content_type_id = 2 THEN 'audio'
+                           WHEN a.content_type_id = 3 THEN 'video'
+                           WHEN a.content_type_id = 4 THEN 'learning'
+                           WHEN a.content_type_id = 5 THEN 'demos'
+                           WHEN a.content_type_id = 6 THEN 'events'
+                           ELSE 'blog'
+                       END, 'blog'
+                   ) as content_type, a.keywords
             FROM articles a
             WHERE a.published_at > NOW() - INTERVAL '7 days'
         """
@@ -986,7 +1016,7 @@ async def get_digest(request: Request):
                         
                 if content_types:
                     placeholders = ','.join(['%s'] * len(content_types))
-                    conditions.append(f"COALESCE(a.content_type, 'blog') IN ({placeholders})")
+                    conditions.append(f"COALESCE(CASE WHEN a.content_type_id = 1 THEN 'blog' WHEN a.content_type_id = 2 THEN 'audio' WHEN a.content_type_id = 3 THEN 'video' WHEN a.content_type_id = 4 THEN 'learning' WHEN a.content_type_id = 5 THEN 'demos' WHEN a.content_type_id = 6 THEN 'events' ELSE 'blog' END, 'blog') IN ({placeholders})")
                     params.extend(content_types)
                 
                 if conditions:
@@ -1158,9 +1188,19 @@ async def get_audio_content(hours: int = 24, limit: int = 20):
         query = """
             SELECT id, title, url, description, source, published_at, 
                    significance_score, reading_time, 
-                   COALESCE(content_type, 'audio') as content_type
+                   COALESCE(
+                       CASE 
+                           WHEN content_type_id = 1 THEN 'blog'
+                           WHEN content_type_id = 2 THEN 'audio'
+                           WHEN content_type_id = 3 THEN 'video'
+                           WHEN content_type_id = 4 THEN 'learning'
+                           WHEN content_type_id = 5 THEN 'demos'
+                           WHEN content_type_id = 6 THEN 'events'
+                           ELSE 'audio'
+                       END, 'audio'
+                   ) as content_type
             FROM articles 
-            WHERE COALESCE(content_type, 'audio') = 'audio' 
+            WHERE content_type_id = 2
             AND published_at >= (CURRENT_TIMESTAMP - INTERVAL '%s hours')
             ORDER BY significance_score DESC, published_at DESC
             LIMIT %s
@@ -1209,9 +1249,19 @@ async def get_video_content(hours: int = 24, limit: int = 20):
         query = """
             SELECT id, title, url, description, source, published_at, 
                    significance_score, reading_time, 
-                   COALESCE(content_type, 'video') as content_type
+                   COALESCE(
+                       CASE 
+                           WHEN content_type_id = 1 THEN 'blog'
+                           WHEN content_type_id = 2 THEN 'audio'
+                           WHEN content_type_id = 3 THEN 'video'
+                           WHEN content_type_id = 4 THEN 'learning'
+                           WHEN content_type_id = 5 THEN 'demos'
+                           WHEN content_type_id = 6 THEN 'events'
+                           ELSE 'video'
+                       END, 'video'
+                   ) as content_type
             FROM articles 
-            WHERE COALESCE(content_type, 'video') = 'video' 
+            WHERE content_type_id = 3
             AND published_at >= (CURRENT_TIMESTAMP - INTERVAL '%s hours')
             ORDER BY significance_score DESC, published_at DESC
             LIMIT %s
@@ -1359,9 +1409,29 @@ async def get_content_by_type(content_type: str, limit: int = 20):
         query = """
             SELECT id, title, url, description, source, published_at, 
                    category, significance_score, reading_time, 
-                   COALESCE(content_type, 'blog') as content_type
+                   COALESCE(
+                       CASE 
+                           WHEN content_type_id = 1 THEN 'blog'
+                           WHEN content_type_id = 2 THEN 'audio'
+                           WHEN content_type_id = 3 THEN 'video'
+                           WHEN content_type_id = 4 THEN 'learning'
+                           WHEN content_type_id = 5 THEN 'demos'
+                           WHEN content_type_id = 6 THEN 'events'
+                           ELSE 'blog'
+                       END, 'blog'
+                   ) as content_type
             FROM articles 
-            WHERE COALESCE(content_type, 'blog') = %s 
+            WHERE COALESCE(
+                CASE 
+                    WHEN content_type_id = 1 THEN 'blog'
+                    WHEN content_type_id = 2 THEN 'audio'
+                    WHEN content_type_id = 3 THEN 'video'
+                    WHEN content_type_id = 4 THEN 'learning'
+                    WHEN content_type_id = 5 THEN 'demos'
+                    WHEN content_type_id = 6 THEN 'events'
+                    ELSE 'blog'
+                END, 'blog'
+            ) = %s 
             AND published_at >= (CURRENT_DATE - INTERVAL '7 days')
             ORDER BY significance_score DESC, published_at DESC
             LIMIT %s
@@ -1585,7 +1655,17 @@ def get_personalized_articles(user_preferences: dict, limit: int = 20) -> List[d
         base_query = """
             SELECT id, title, url, description, source, published_at, 
                    category, significance_score, reading_time, 
-                   COALESCE(content_type, 'blog') as content_type, keywords
+                   COALESCE(
+                       CASE 
+                           WHEN content_type_id = 1 THEN 'blog'
+                           WHEN content_type_id = 2 THEN 'audio'
+                           WHEN content_type_id = 3 THEN 'video'
+                           WHEN content_type_id = 4 THEN 'learning'
+                           WHEN content_type_id = 5 THEN 'demos'
+                           WHEN content_type_id = 6 THEN 'events'
+                           ELSE 'blog'
+                       END, 'blog'
+                   ) as content_type, keywords
             FROM articles
             WHERE published_at >= (CURRENT_DATE - INTERVAL '7 days')
         """
@@ -1607,7 +1687,7 @@ def get_personalized_articles(user_preferences: dict, limit: int = 20) -> List[d
         
         if user_content_types:
             placeholders = ','.join(['%s'] * len(user_content_types))
-            conditions.append(f"COALESCE(content_type, 'blog') IN ({placeholders})")
+            conditions.append(f"COALESCE(CASE WHEN content_type_id = 1 THEN 'blog' WHEN content_type_id = 2 THEN 'audio' WHEN content_type_id = 3 THEN 'video' WHEN content_type_id = 4 THEN 'learning' WHEN content_type_id = 5 THEN 'demos' WHEN content_type_id = 6 THEN 'events' ELSE 'blog' END, 'blog') IN ({placeholders})")
             params.extend(user_content_types)
         
         if conditions:
@@ -1762,9 +1842,29 @@ async def get_content_by_type(content_type: str, limit: int = 20):
         query = """
             SELECT id, title, url, description, source, published_at, 
                    significance_score, reading_time, 
-                   COALESCE(content_type, 'blog') as content_type, category, image_url
+                   COALESCE(
+                       CASE 
+                           WHEN content_type_id = 1 THEN 'blog'
+                           WHEN content_type_id = 2 THEN 'audio'
+                           WHEN content_type_id = 3 THEN 'video'
+                           WHEN content_type_id = 4 THEN 'learning'
+                           WHEN content_type_id = 5 THEN 'demos'
+                           WHEN content_type_id = 6 THEN 'events'
+                           ELSE 'blog'
+                       END, 'blog'
+                   ) as content_type, category, image_url
             FROM articles 
-            WHERE COALESCE(content_type, 'blog') = %s
+            WHERE COALESCE(
+                CASE 
+                    WHEN content_type_id = 1 THEN 'blog'
+                    WHEN content_type_id = 2 THEN 'audio'
+                    WHEN content_type_id = 3 THEN 'video'
+                    WHEN content_type_id = 4 THEN 'learning'
+                    WHEN content_type_id = 5 THEN 'demos'
+                    WHEN content_type_id = 6 THEN 'events'
+                    ELSE 'blog'
+                END, 'blog'
+            ) = %s
             AND published_at >= (CURRENT_DATE - INTERVAL '30 days')
             ORDER BY significance_score DESC, published_at DESC
             LIMIT %s
@@ -1882,10 +1982,30 @@ async def get_database_info():
         
         # Get recent articles by content type
         content_type_query = """
-            SELECT COALESCE(content_type, 'blog') as content_type, COUNT(*) as count
+            SELECT COALESCE(
+                CASE 
+                    WHEN content_type_id = 1 THEN 'blog'
+                    WHEN content_type_id = 2 THEN 'audio'
+                    WHEN content_type_id = 3 THEN 'video'
+                    WHEN content_type_id = 4 THEN 'learning'
+                    WHEN content_type_id = 5 THEN 'demos'
+                    WHEN content_type_id = 6 THEN 'events'
+                    ELSE 'blog'
+                END, 'blog'
+            ) as content_type, COUNT(*) as count
             FROM articles
             WHERE published_at >= (CURRENT_DATE - INTERVAL '30 days')
-            GROUP BY COALESCE(content_type, 'blog')
+            GROUP BY COALESCE(
+                CASE 
+                    WHEN content_type_id = 1 THEN 'blog'
+                    WHEN content_type_id = 2 THEN 'audio'
+                    WHEN content_type_id = 3 THEN 'video'
+                    WHEN content_type_id = 4 THEN 'learning'
+                    WHEN content_type_id = 5 THEN 'demos'
+                    WHEN content_type_id = 6 THEN 'events'
+                    ELSE 'blog'
+                END, 'blog'
+            )
             ORDER BY count DESC
         """
         
