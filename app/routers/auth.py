@@ -7,6 +7,9 @@ Maintains compatibility with existing frontend API endpoints
 import json
 import base64
 import logging
+import os
+import random
+import string
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -20,6 +23,88 @@ from app.services.auth_service import AuthService
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# OTP storage (in production, use Redis or database)
+otp_storage = {}
+
+def generate_otp() -> str:
+    """Generate a 6-digit OTP"""
+    return ''.join(random.choices(string.digits, k=6))
+
+def send_otp_email(email: str, otp: str, name: str = "") -> bool:
+    """Send OTP via email using Brevo API (same as admin interface)"""
+    try:
+        brevo_api_key = os.getenv('BREVO_API_KEY', '')
+        if not brevo_api_key:
+            logger.warning("⚠️ BREVO_API_KEY not set, using fallback mode")
+            return False
+        
+        # Use Brevo API for sending email
+        import requests
+        
+        url = "https://api.brevo.com/v3/smtp/email"
+        headers = {
+            "api-key": brevo_api_key,
+            "Content-Type": "application/json"
+        }
+        
+        # Determine sender and subject based on email domain
+        is_admin = email == "admin@vidyagam.com"
+        sender_email = "noreply@vidyagam.com"
+        sender_name = "Vidyagam AI News"
+        subject = f"{'Admin ' if is_admin else ''}Login OTP - Vidyagam AI News"
+        
+        data = {
+            "sender": {"email": sender_email, "name": sender_name},
+            "to": [{"email": email, "name": name or "User"}],
+            "subject": subject,
+            "htmlContent": f"""
+            <html>
+            <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; border-radius: 10px; text-align: center; margin-bottom: 30px;">
+                    <h1 style="color: white; margin: 0; font-size: 28px;">Vidyagam AI News</h1>
+                    <p style="color: #f8f9ff; margin: 10px 0 0 0;">Your AI News Authentication</p>
+                </div>
+                
+                <div style="background: #f8f9fa; padding: 30px; border-radius: 10px; text-align: center;">
+                    <h2 style="color: #333; margin-top: 0;">{'Admin ' if is_admin else ''}Login Verification</h2>
+                    <p style="color: #666; font-size: 16px; line-height: 1.5;">
+                        Hi {name or 'there'}! Your one-time password for {'admin ' if is_admin else ''}access is:
+                    </p>
+                    
+                    <div style="background: white; border: 2px solid #007bff; border-radius: 8px; padding: 20px; margin: 20px 0; display: inline-block;">
+                        <span style="font-size: 32px; font-weight: bold; color: #007bff; letter-spacing: 4px;">{otp}</span>
+                    </div>
+                    
+                    <p style="color: #666; font-size: 14px; line-height: 1.5;">
+                        This OTP is valid for <strong>5 minutes</strong>. Please do not share it with anyone.
+                    </p>
+                    
+                    {f'<div style="background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 5px; padding: 15px; margin: 20px 0;"><p style="color: #856404; margin: 0; font-size: 14px;"><strong>Admin Access:</strong> You are logging in with administrator privileges.</p></div>' if is_admin else ''}
+                </div>
+                
+                <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee;">
+                    <p style="color: #999; font-size: 12px; margin: 0;">
+                        If you didn't request this, please ignore this email.<br>
+                        © 2025 Vidyagam AI News - Personalized AI Intelligence
+                    </p>
+                </div>
+            </body>
+            </html>
+            """
+        }
+        
+        response = requests.post(url, headers=headers, json=data, timeout=10)
+        if response.status_code == 201:
+            logger.info(f"✅ OTP email sent successfully to {email}")
+            return True
+        else:
+            logger.error(f"❌ Failed to send OTP email: {response.status_code} - {response.text}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"❌ Email service error: {str(e)}")
+        return False
 
 
 def get_auth_service() -> AuthService:
@@ -134,22 +219,37 @@ async def send_otp(
     try:
         logger.info(f"📧 OTP requested for: {request.email}")
         
-        # For now, return success with test OTP for development
-        # In production, implement actual OTP sending via email service
-        test_otp = "123456"
+        # Generate a secure 6-digit OTP
+        otp = generate_otp()
         
+        # Store OTP with timestamp for validation
+        from datetime import timedelta
+        otp_storage[request.email] = {
+            'otp': otp,
+            'timestamp': datetime.utcnow(),
+            'auth_mode': request.auth_mode
+        }
+        
+        # Send OTP via email using Brevo API
+        email_sent = send_otp_email(request.email, otp, request.name or "")
+        
+        # Prepare response
         response = {
             'success': True,
             'message': f'OTP sent to {request.email}',
-            'otpSent': False,  # Set to True when email service is implemented
+            'otpSent': email_sent,  # True if email was sent successfully
             'debug_info': {
-                'otp_for_testing': test_otp,
+                'otp_for_testing': otp if not email_sent else None,  # Show OTP only if email failed
                 'auth_mode': request.auth_mode,
-                'email_service_status': 'development_mode'
+                'email_service_status': 'brevo_active' if email_sent else 'brevo_fallback'
             }
         }
         
-        logger.info(f"✅ OTP generation successful for: {request.email}")
+        if email_sent:
+            logger.info(f"✅ OTP email sent successfully to: {request.email}")
+        else:
+            logger.warning(f"⚠️ Email service unavailable, OTP available in debug_info for: {request.email}")
+        
         return response
         
     except Exception as e:
@@ -177,15 +277,46 @@ async def verify_otp(
     try:
         logger.info(f"🔐 OTP verification for: {request.email}")
         
-        # For development, accept the test OTP
-        if request.otp != "123456":
+        # Check if OTP exists and is valid
+        stored_otp_data = otp_storage.get(request.email)
+        if not stored_otp_data:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    'error': 'No OTP found',
+                    'message': 'No OTP found for this email. Please request a new OTP.',
+                    'error_code': 'OTP_NOT_FOUND'
+                }
+            )
+        
+        # Check OTP expiration (5 minutes)
+        from datetime import timedelta
+        if datetime.utcnow() - stored_otp_data['timestamp'] > timedelta(minutes=5):
+            # Clean up expired OTP
+            del otp_storage[request.email]
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    'error': 'OTP expired',
+                    'message': 'The OTP has expired. Please request a new OTP.',
+                    'error_code': 'OTP_EXPIRED'
+                }
+            )
+        
+        # Verify OTP
+        if request.otp != stored_otp_data['otp']:
             raise HTTPException(
                 status_code=400,
                 detail={
                     'error': 'Invalid OTP',
-                    'message': 'The OTP code is incorrect or has expired'
+                    'message': 'The OTP code is incorrect. Please try again.',
+                    'error_code': 'OTP_INVALID'
                 }
             )
+        
+        # OTP is valid, clean up
+        del otp_storage[request.email]
+        logger.info(f"✅ OTP validated successfully for: {request.email}")
         
         # Create user data from request
         user_data = {
@@ -198,8 +329,13 @@ async def verify_otp(
         # Create or update user in PostgreSQL
         user = auth_service.create_or_update_user(user_data)
         
+        # Check if this is an admin user
+        is_admin = request.email == 'admin@vidyagam.com'
+        if is_admin:
+            logger.info(f"🔑 Admin authentication successful for: {request.email}")
+        
         # Create JWT token with user data including admin flag
-        user_data_with_admin = {**user_data, 'is_admin': user.get('is_admin', False)}
+        user_data_with_admin = {**user_data, 'is_admin': is_admin or user.get('is_admin', False)}
         jwt_token = auth_service.create_jwt_token(user_data_with_admin)
         
         # Return AuthResponse format expected by frontend
@@ -213,14 +349,14 @@ async def verify_otp(
                 'name': str(user.get('name', '')),
                 'picture': str(user.get('profile_image', '')),
                 'verified_email': bool(user.get('verified_email', True)),
-                'is_admin': bool(user.get('is_admin', False))
+                'is_admin': bool(is_admin or user.get('is_admin', False))
             },
             'expires_in': 3600,  # 1 hour
             'router_auth': False,  # Modular architecture
             'isUserExist': True  # User exists after creation/update
         }
         
-        logger.info(f"✅ OTP verification successful for: {request.email}")
+        logger.info(f"✅ OTP verification successful for: {request.email} (Admin: {response['user']['is_admin']})")
         return response
         
     except HTTPException:
