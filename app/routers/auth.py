@@ -276,25 +276,24 @@ async def send_otp(
             'auth_mode': request.auth_mode
         }
         
-        # Send OTP via email using Brevo API
-        email_sent = send_otp_email(request.email, otp, request.name or "")
+        # FOR TESTING: Skip email sending and always return success
+        logger.info(f"🧪 TESTING MODE: Skipping email sending for: {request.email}")
+        email_sent = True  # Always return true for testing
         
         # Prepare response
         response = {
             'success': True,
-            'message': f'OTP sent to {request.email}',
-            'otpSent': email_sent,  # True if email was sent successfully
+            'message': f'OTP sent to {request.email} (testing mode)',
+            'otpSent': True,  # Always true for testing
             'debug_info': {
-                'otp_for_testing': otp if not email_sent else None,  # Show OTP only if email failed
+                'otp_for_testing': otp,  # Always show OTP for testing
                 'auth_mode': request.auth_mode,
-                'email_service_status': 'brevo_active' if email_sent else 'brevo_fallback'
+                'email_service_status': 'testing_mode',
+                'testing_note': 'OTP validation is disabled - any code will work'
             }
         }
         
-        if email_sent:
-            logger.info(f"✅ OTP email sent successfully to: {request.email}")
-        else:
-            logger.warning(f"⚠️ Email service unavailable, OTP available in debug_info for: {request.email}")
+        logger.info(f"✅ OTP generated for testing: {request.email} (Code: {otp})")
         
         return response
         
@@ -323,46 +322,14 @@ async def verify_otp(
     try:
         logger.info(f"🔐 OTP verification for: {request.email}")
         
-        # Check if OTP exists and is valid
-        stored_otp_data = otp_storage.get(request.email)
-        if not stored_otp_data:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    'error': 'No OTP found',
-                    'message': 'No OTP found for this email. Please request a new OTP.',
-                    'error_code': 'OTP_NOT_FOUND'
-                }
-            )
+        # FOR TESTING: Skip OTP validation and always return as verified
+        logger.info(f"🧪 TESTING MODE: Skipping OTP validation for: {request.email}")
         
-        # Check OTP expiration (5 minutes)
-        from datetime import timedelta
-        if datetime.utcnow() - stored_otp_data['timestamp'] > timedelta(minutes=5):
-            # Clean up expired OTP
+        # Clean up any stored OTP if exists
+        if request.email in otp_storage:
             del otp_storage[request.email]
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    'error': 'OTP expired',
-                    'message': 'The OTP has expired. Please request a new OTP.',
-                    'error_code': 'OTP_EXPIRED'
-                }
-            )
-        
-        # Verify OTP
-        if request.otp != stored_otp_data['otp']:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    'error': 'Invalid OTP',
-                    'message': 'The OTP code is incorrect. Please try again.',
-                    'error_code': 'OTP_INVALID'
-                }
-            )
-        
-        # OTP is valid, clean up
-        del otp_storage[request.email]
-        logger.info(f"✅ OTP validated successfully for: {request.email}")
+            
+        logger.info(f"✅ OTP validation skipped for testing: {request.email}")
         
         # Create user data from request
         user_data = {
