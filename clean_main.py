@@ -2018,7 +2018,7 @@ async def update_rss_sources(request: Request):
         
         # Clear existing sources and add working ones
         logger.info("🧹 Clearing existing sources...")
-        db.execute_query("DELETE FROM ai_sources;")
+        db.execute_query("DELETE FROM ai_sources;", fetch_results=False)
         
         # Insert working AI sources with correct RSS feeds
         logger.info("📚 Inserting working AI news sources...")
@@ -2055,14 +2055,14 @@ async def update_rss_sources(request: Request):
             db.execute_query("""
                 INSERT INTO ai_sources (name, rss_url, website, content_type, category, enabled, priority, description)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """, source)
+            """, source, fetch_results=False)
         
         # Create indexes
         logger.info("🔗 Creating indexes...")
-        db.execute_query("CREATE INDEX IF NOT EXISTS idx_ai_sources_enabled ON ai_sources(enabled);")
-        db.execute_query("CREATE INDEX IF NOT EXISTS idx_ai_sources_priority ON ai_sources(priority);")
-        db.execute_query("CREATE INDEX IF NOT EXISTS idx_ai_sources_category ON ai_sources(category);")
-        db.execute_query("CREATE INDEX IF NOT EXISTS idx_ai_sources_content_type ON ai_sources(content_type);")
+        db.execute_query("CREATE INDEX IF NOT EXISTS idx_ai_sources_enabled ON ai_sources(enabled);", fetch_results=False)
+        db.execute_query("CREATE INDEX IF NOT EXISTS idx_ai_sources_priority ON ai_sources(priority);", fetch_results=False)
+        db.execute_query("CREATE INDEX IF NOT EXISTS idx_ai_sources_category ON ai_sources(category);", fetch_results=False)
+        db.execute_query("CREATE INDEX IF NOT EXISTS idx_ai_sources_content_type ON ai_sources(content_type);", fetch_results=False)
         
         # Get count - with error handling
         try:
