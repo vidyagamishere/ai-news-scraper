@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 # Import modular routers
-from app.routers import health, auth, content
+from app.routers import health, auth, content, admin
 from db_service import initialize_database, close_database_service
 
 # Configure logging
@@ -83,6 +83,7 @@ app.add_middleware(
 app.include_router(health.router, tags=["health"])
 app.include_router(auth.router, tags=["authentication"])
 app.include_router(content.router, tags=["content"])
+app.include_router(admin.router, tags=["admin"])
 
 # Additional endpoints for admin and utilities
 @app.get("/sources")

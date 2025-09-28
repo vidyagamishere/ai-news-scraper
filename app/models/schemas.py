@@ -28,6 +28,7 @@ class UserResponse(UserBase):
     preferences: Dict[str, Any] = {}
     created_at: datetime
     verified_email: bool = False
+    is_admin: bool = False
     
     class Config:
         from_attributes = True
