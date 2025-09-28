@@ -2210,21 +2210,41 @@ async def update_rss_sources(request: Request):
 
 # Additional admin endpoints for frontend compatibility
 @app.get("/admin/sources")
-async def get_admin_sources(request: Request):
+async def get_admin_sources(request: Request, auth_service: AuthService = Depends(get_auth_service)):
     """Get all AI sources for admin management"""
     try:
         logger.info("🔧 Admin sources requested")
         
-        # Simple admin key check
+        # Check multiple authentication methods
         auth_header = request.headers.get('Authorization', '')
         x_admin_key = request.headers.get('x-admin-key', '')
         
-        if not (auth_header.startswith('Bearer admin-') or x_admin_key):
+        is_authenticated = False
+        
+        # Method 1: Check for admin key
+        if auth_header.startswith('Bearer admin-') or x_admin_key:
+            is_authenticated = True
+            logger.info("🔑 Admin authenticated with admin key")
+        
+        # Method 2: Check for valid JWT token with admin privileges
+        elif auth_header.startswith('Bearer '):
+            token = auth_header.split(' ')[1]
+            try:
+                user_data = auth_service.verify_jwt_token(token)
+                if user_data and user_data.get('is_admin'):
+                    is_authenticated = True
+                    logger.info(f"🔑 Admin authenticated with JWT token: {user_data.get('email')}")
+                else:
+                    logger.warning("🚫 JWT token valid but user is not admin")
+            except Exception as e:
+                logger.warning(f"🚫 JWT token verification failed: {str(e)}")
+        
+        if not is_authenticated:
             raise HTTPException(
                 status_code=401,
                 detail={
                     'error': 'Admin authentication required',
-                    'message': 'Please provide admin credentials'
+                    'message': 'Please provide admin credentials or valid admin JWT token'
                 }
             )
         
@@ -2273,21 +2293,41 @@ async def get_admin_sources(request: Request):
 
 
 @app.post("/admin/scrape")
-async def admin_scrape(request: Request):
+async def admin_scrape(request: Request, auth_service: AuthService = Depends(get_auth_service)):
     """Initiate admin scraping operation"""
     try:
         logger.info("🔧 Admin scrape initiated")
         
-        # Simple admin key check
+        # Check multiple authentication methods
         auth_header = request.headers.get('Authorization', '')
         x_admin_key = request.headers.get('x-admin-key', '')
         
-        if not (auth_header.startswith('Bearer admin-') or x_admin_key):
+        is_authenticated = False
+        
+        # Method 1: Check for admin key
+        if auth_header.startswith('Bearer admin-') or x_admin_key:
+            is_authenticated = True
+            logger.info("🔑 Admin authenticated with admin key")
+        
+        # Method 2: Check for valid JWT token with admin privileges
+        elif auth_header.startswith('Bearer '):
+            token = auth_header.split(' ')[1]
+            try:
+                user_data = auth_service.verify_jwt_token(token)
+                if user_data and user_data.get('is_admin'):
+                    is_authenticated = True
+                    logger.info(f"🔑 Admin authenticated with JWT token: {user_data.get('email')}")
+                else:
+                    logger.warning("🚫 JWT token valid but user is not admin")
+            except Exception as e:
+                logger.warning(f"🚫 JWT token verification failed: {str(e)}")
+        
+        if not is_authenticated:
             raise HTTPException(
                 status_code=401,
                 detail={
                     'error': 'Admin authentication required',
-                    'message': 'Please provide admin credentials'
+                    'message': 'Please provide admin credentials or valid admin JWT token'
                 }
             )
         
