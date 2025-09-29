@@ -331,7 +331,7 @@ async def scrape_content_from_sources():
                 COALESCE(c.name, 'general') as category
             FROM ai_sources s
             LEFT JOIN ai_topics t ON s.ai_topic_id = t.id
-            LEFT JOIN ai_categories.master c ON t.category_id = c.category_id
+            LEFT JOIN ai_categories_master c ON t.category_id = c.category_id
             WHERE s.enabled = TRUE
         """
         sources = db.execute_query(sources_query)
@@ -1161,7 +1161,7 @@ async def get_sources():
                 COALESCE(c.name, 'general') as category
             FROM ai_sources s
             LEFT JOIN ai_topics t ON s.ai_topic_id = t.id
-            LEFT JOIN ai_categories.master c ON t.category_id = c.category_id
+            LEFT JOIN ai_categories_master c ON t.category_id = c.category_id
             ORDER BY s.priority ASC, s.name ASC
         """
         
@@ -1337,7 +1337,7 @@ async def get_multimedia_sources():
                 COALESCE(c.name, 'general') as category
             FROM ai_sources s
             LEFT JOIN ai_topics t ON s.ai_topic_id = t.id
-            LEFT JOIN ai_categories.master c ON t.category_id = c.category_id
+            LEFT JOIN ai_categories_master c ON t.category_id = c.category_id
             WHERE s.content_type IN ('audio', 'video')
             ORDER BY s.content_type, s.priority ASC, s.name ASC
         """
@@ -1791,7 +1791,7 @@ async def get_multimedia_sources():
                 COALESCE(c.name, 'general') as category
             FROM ai_sources s
             LEFT JOIN ai_topics t ON s.ai_topic_id = t.id
-            LEFT JOIN ai_categories.master c ON t.category_id = c.category_id
+            LEFT JOIN ai_categories_master c ON t.category_id = c.category_id
             WHERE s.content_type IN ('audio', 'video')
             ORDER BY s.content_type, s.priority ASC
         """
@@ -2299,7 +2299,7 @@ async def get_admin_sources(request: Request, auth_service: AuthService = Depend
                 COALESCE(c.name, 'general') as category
             FROM ai_sources s
             LEFT JOIN ai_topics t ON s.ai_topic_id = t.id
-            LEFT JOIN ai_categories.master c ON t.category_id = c.category_id
+            LEFT JOIN ai_categories_master c ON t.category_id = c.category_id
             ORDER BY s.priority ASC, s.name ASC
         """
         
@@ -2391,7 +2391,7 @@ async def admin_scrape(request: Request, auth_service: AuthService = Depends(get
                 COALESCE(c.name, 'general') as category
             FROM ai_sources s
             LEFT JOIN ai_topics t ON s.ai_topic_id = t.id
-            LEFT JOIN ai_categories.master c ON t.category_id = c.category_id
+            LEFT JOIN ai_categories_master c ON t.category_id = c.category_id
             WHERE s.enabled = TRUE
             ORDER BY s.priority ASC
         """
