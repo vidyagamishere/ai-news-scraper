@@ -24,12 +24,13 @@ from dotenv import load_dotenv
 from bs4 import BeautifulSoup
 
 # Import Pydantic models for authentication and responses
-try:
+# Temporarily disabled to avoid app/ imports
+if False:
     from app.models.schemas import (
         UserResponse, UserPreferences, GoogleAuthRequest, 
         OTPRequest, OTPVerifyRequest, TokenResponse
     )
-except ImportError:
+else:
     # Define minimal models inline if app.models.schemas is not available
     class UserResponse(BaseModel):
         id: str
@@ -328,7 +329,7 @@ async def scrape_content_from_sources():
                 s.name, 
                 s.rss_url, 
                 s.content_type,
-                s.category
+                'general' as category
             FROM ai_sources s
             WHERE s.enabled = TRUE
         """
@@ -1168,6 +1169,16 @@ async def get_sources():
                 "database": "postgresql"
             }
         
+        # First check what columns actually exist
+        column_query = """
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'ai_sources'
+            ORDER BY ordinal_position;
+        """
+        columns = db.execute_query(column_query)
+        logger.info(f"🔍 ai_sources columns: {[col['column_name'] for col in columns]}")
+        
         query = """
             SELECT 
                 s.name, 
@@ -1176,7 +1187,7 @@ async def get_sources():
                 s.content_type, 
                 s.enabled, 
                 s.priority,
-                s.category
+                'general' as category
             FROM ai_sources s
             ORDER BY s.priority ASC, s.name ASC
         """
@@ -1350,7 +1361,7 @@ async def get_multimedia_sources():
                 s.content_type, 
                 s.enabled, 
                 s.priority,
-                s.category
+                'general' as category
             FROM ai_sources s
             WHERE s.content_type IN ('audio', 'video')
             ORDER BY s.content_type, s.priority ASC, s.name ASC
@@ -1802,7 +1813,7 @@ async def get_multimedia_sources():
                 s.content_type, 
                 s.enabled, 
                 s.priority,
-                s.category
+                'general' as category
             FROM ai_sources s
             WHERE s.content_type IN ('audio', 'video')
             ORDER BY s.content_type, s.priority ASC
@@ -2308,7 +2319,7 @@ async def get_admin_sources(request: Request, auth_service: AuthService = Depend
                 s.content_type, 
                 s.priority, 
                 s.enabled,
-                s.category
+                'general' as category
             FROM ai_sources s
             ORDER BY s.priority ASC, s.name ASC
         """
@@ -2398,7 +2409,7 @@ async def admin_scrape(request: Request, auth_service: AuthService = Depends(get
                 s.website, 
                 s.content_type, 
                 s.priority,
-                s.category
+                'general' as category
             FROM ai_sources s
             WHERE s.enabled = TRUE
             ORDER BY s.priority ASC
