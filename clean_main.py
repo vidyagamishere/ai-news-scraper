@@ -331,6 +331,7 @@ async def scrape_content_from_sources():
                 s.content_type,
                 'general' as category
             FROM ai_sources s
+            LEFT JOIN ai_topics t ON s.ai_topic_id = t.id
             WHERE s.enabled = TRUE
         """
         sources = db.execute_query(sources_query)
@@ -1191,14 +1192,18 @@ async def get_sources():
         
         query = """
             SELECT 
+                s.id,
                 s.name, 
                 s.rss_url, 
                 s.website, 
                 s.content_type, 
                 s.enabled, 
                 s.priority,
+                s.ai_topic_id,
+                t.name as topic_name,
                 'general' as category
             FROM ai_sources s
+            LEFT JOIN ai_topics t ON s.ai_topic_id = t.id
             ORDER BY s.priority ASC, s.name ASC
         """
         
@@ -1373,6 +1378,7 @@ async def get_multimedia_sources():
                 s.priority,
                 'general' as category
             FROM ai_sources s
+            LEFT JOIN ai_topics t ON s.ai_topic_id = t.id
             WHERE s.content_type IN ('audio', 'video')
             ORDER BY s.content_type, s.priority ASC, s.name ASC
         """
@@ -1825,6 +1831,7 @@ async def get_multimedia_sources():
                 s.priority,
                 'general' as category
             FROM ai_sources s
+            LEFT JOIN ai_topics t ON s.ai_topic_id = t.id
             WHERE s.content_type IN ('audio', 'video')
             ORDER BY s.content_type, s.priority ASC
         """
@@ -2331,6 +2338,7 @@ async def get_admin_sources(request: Request, auth_service: AuthService = Depend
                 s.enabled,
                 'general' as category
             FROM ai_sources s
+            LEFT JOIN ai_topics t ON s.ai_topic_id = t.id
             ORDER BY s.priority ASC, s.name ASC
         """
         
@@ -2421,6 +2429,7 @@ async def admin_scrape(request: Request, auth_service: AuthService = Depends(get
                 s.priority,
                 'general' as category
             FROM ai_sources s
+            LEFT JOIN ai_topics t ON s.ai_topic_id = t.id
             WHERE s.enabled = TRUE
             ORDER BY s.priority ASC
         """
