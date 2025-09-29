@@ -322,8 +322,18 @@ async def scrape_content_from_sources():
         logger.info("🕷️ Starting content scraping from ai_sources...")
         db = get_database_service()
         
-        # Get enabled sources
-        sources_query = "SELECT name, rss_url, content_type FROM ai_sources WHERE enabled = TRUE"
+        # Get enabled sources with category lookup
+        sources_query = """
+            SELECT 
+                s.name, 
+                s.rss_url, 
+                s.content_type,
+                COALESCE(c.name, 'general') as category
+            FROM ai_sources s
+            LEFT JOIN ai_topics t ON s.ai_topic_id = t.id
+            LEFT JOIN ai_categories.master c ON t.category_id = c.category_id
+            WHERE s.enabled = TRUE
+        """
         sources = db.execute_query(sources_query)
         
         scraped_count = 0
@@ -2252,9 +2262,18 @@ async def get_admin_sources(request: Request, auth_service: AuthService = Depend
         db = get_database_service()
         
         sources_query = """
-            SELECT name, rss_url, website, content_type, priority, enabled
-            FROM ai_sources
-            ORDER BY priority ASC, name ASC
+            SELECT 
+                s.name, 
+                s.rss_url, 
+                s.website, 
+                s.content_type, 
+                s.priority, 
+                s.enabled,
+                COALESCE(c.name, 'general') as category
+            FROM ai_sources s
+            LEFT JOIN ai_topics t ON s.ai_topic_id = t.id
+            LEFT JOIN ai_categories.master c ON t.category_id = c.category_id
+            ORDER BY s.priority ASC, s.name ASC
         """
         
         sources = db.execute_query(sources_query)
@@ -2266,7 +2285,7 @@ async def get_admin_sources(request: Request, auth_service: AuthService = Depend
                 'rss_url': source['rss_url'],
                 'website': source.get('website', ''),
                 'content_type': source.get('content_type', 'blogs'),
-                'category': 'general',  # Default since category column doesn't exist
+                'category': source.get('category', 'general'),
                 'priority': source['priority'],
                 'enabled': source['enabled'],
                 'description': ''  # Description column doesn't exist in current schema
@@ -2336,10 +2355,18 @@ async def admin_scrape(request: Request, auth_service: AuthService = Depends(get
         
         # Get enabled sources for scraping
         sources_query = """
-            SELECT name, rss_url, website, content_type, priority
-            FROM ai_sources
-            WHERE enabled = TRUE
-            ORDER BY priority ASC
+            SELECT 
+                s.name, 
+                s.rss_url, 
+                s.website, 
+                s.content_type, 
+                s.priority,
+                COALESCE(c.name, 'general') as category
+            FROM ai_sources s
+            LEFT JOIN ai_topics t ON s.ai_topic_id = t.id
+            LEFT JOIN ai_categories.master c ON t.category_id = c.category_id
+            WHERE s.enabled = TRUE
+            ORDER BY s.priority ASC
         """
         
         sources = db.execute_query(sources_query)
