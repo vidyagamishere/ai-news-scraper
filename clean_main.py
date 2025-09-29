@@ -1148,6 +1148,24 @@ async def get_sources():
         logger.info("📚 Sources requested")
         db = get_database_service()
         
+        # First check if table exists
+        table_check = """
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_name = 'ai_sources'
+            );
+        """
+        table_exists = db.execute_query(table_check)
+        logger.info(f"🔍 ai_sources table exists: {table_exists}")
+        
+        if not table_exists or not table_exists[0]['exists']:
+            return {
+                "error": "ai_sources table does not exist",
+                "sources": [],
+                "total_count": 0,
+                "database": "postgresql"
+            }
+        
         query = """
             SELECT 
                 s.name, 
