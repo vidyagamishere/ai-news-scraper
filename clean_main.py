@@ -1151,9 +1151,18 @@ async def get_sources():
         db = get_database_service()
         
         query = """
-            SELECT name, rss_url, website, content_type, category, enabled, priority, description
-            FROM ai_sources
-            ORDER BY priority ASC, name ASC
+            SELECT 
+                s.name, 
+                s.rss_url, 
+                s.website, 
+                s.content_type, 
+                s.enabled, 
+                s.priority,
+                COALESCE(c.name, 'general') as category
+            FROM ai_sources s
+            LEFT JOIN ai_topics t ON s.ai_topic_id = t.id
+            LEFT JOIN ai_categories.master c ON t.category_id = c.category_id
+            ORDER BY s.priority ASC, s.name ASC
         """
         
         sources = db.execute_query(query)
@@ -1318,10 +1327,19 @@ async def get_multimedia_sources():
         db = get_database_service()
         
         query = """
-            SELECT name, rss_url, website, content_type, category, enabled, priority, description
-            FROM ai_sources
-            WHERE content_type IN ('audio', 'video')
-            ORDER BY content_type, priority ASC, name ASC
+            SELECT 
+                s.name, 
+                s.rss_url, 
+                s.website, 
+                s.content_type, 
+                s.enabled, 
+                s.priority,
+                COALESCE(c.name, 'general') as category
+            FROM ai_sources s
+            LEFT JOIN ai_topics t ON s.ai_topic_id = t.id
+            LEFT JOIN ai_categories.master c ON t.category_id = c.category_id
+            WHERE s.content_type IN ('audio', 'video')
+            ORDER BY s.content_type, s.priority ASC, s.name ASC
         """
         
         sources = db.execute_query(query)
@@ -1763,10 +1781,19 @@ async def get_multimedia_sources():
         db = get_database_service()
         
         query = """
-            SELECT name, rss_url, website, content_type, category, enabled, priority
-            FROM ai_sources
-            WHERE content_type IN ('audio', 'video')
-            ORDER BY content_type, priority ASC
+            SELECT 
+                s.name, 
+                s.rss_url, 
+                s.website, 
+                s.content_type, 
+                s.enabled, 
+                s.priority,
+                COALESCE(c.name, 'general') as category
+            FROM ai_sources s
+            LEFT JOIN ai_topics t ON s.ai_topic_id = t.id
+            LEFT JOIN ai_categories.master c ON t.category_id = c.category_id
+            WHERE s.content_type IN ('audio', 'video')
+            ORDER BY s.content_type, s.priority ASC
         """
         
         sources = db.execute_query(query)
