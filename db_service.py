@@ -272,13 +272,12 @@ class PostgreSQLService:
                             -- Check if old 'sources' table exists and migrate data
                             IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'sources') THEN
                                 -- Migrate data from sources to ai_sources if ai_sources is empty
-                                INSERT INTO ai_sources (name, rss_url, website, content_type, category, enabled, priority)
+                                INSERT INTO ai_sources (name, rss_url, website, content_type, enabled, priority)
                                 SELECT 
                                     name, 
                                     COALESCE(rss_url, url) as rss_url,
                                     website,
                                     COALESCE(content_type, 'articles') as content_type,
-                                    COALESCE(category, 'general') as category,
                                     COALESCE(enabled, true) as enabled,
                                     COALESCE(priority, 5) as priority
                                 FROM sources
@@ -491,12 +490,13 @@ class PostgreSQLService:
             ("ICLR", "https://iclr.cc/", "https://iclr.cc", "events", "research", True, 3)
         ]
         
+        # Note: category is now derived from ai_topic_id relationship, not stored directly
         for name, rss_url, website, content_type, category, enabled, priority in ai_sources:
             cursor.execute("""
-                INSERT INTO ai_sources (name, rss_url, website, content_type, category, enabled, priority)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO ai_sources (name, rss_url, website, content_type, enabled, priority)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 ON CONFLICT (name) DO NOTHING
-            """, (name, rss_url, website, content_type, category, enabled, priority))
+            """, (name, rss_url, website, content_type, enabled, priority))
         
         logger.info("✅ AI sources populated successfully")
     
