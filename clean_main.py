@@ -2224,7 +2224,7 @@ async def update_rss_sources(request: Request):
 async def get_admin_sources(request: Request, auth_service: AuthService = Depends(get_auth_service)):
     """Get all AI sources for admin management"""
     try:
-        logger.info("🔧 Admin sources requested (JWT auth enabled)")
+        logger.info("🔧 Admin sources requested (JWT auth + category JOIN enabled)")
         
         # Check multiple authentication methods
         auth_header = request.headers.get('Authorization', '')
