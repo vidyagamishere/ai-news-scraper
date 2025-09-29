@@ -1142,6 +1142,16 @@ async def manual_scrape(current_user: Optional[UserResponse] = Depends(get_curre
         )
 
 # Sources endpoint for content management
+@app.get("/debug-sources")
+async def debug_sources():
+    """Debug endpoint to test basic database access"""
+    try:
+        db = get_database_service()
+        result = db.execute_query("SELECT * FROM ai_sources LIMIT 1;")
+        return {"debug": True, "sample_row": result}
+    except Exception as e:
+        return {"error": str(e), "debug": True}
+
 @app.get("/sources")
 async def get_sources():
     """Get all AI news sources"""
