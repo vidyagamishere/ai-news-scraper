@@ -1148,19 +1148,21 @@ async def get_sources():
         logger.info("📚 Sources requested")
         db = get_database_service()
         
-        # First check if table exists
-        table_check = """
-            SELECT EXISTS (
-                SELECT FROM information_schema.tables 
-                WHERE table_name = 'ai_sources'
-            );
-        """
-        table_exists = db.execute_query(table_check)
-        logger.info(f"🔍 ai_sources table exists: {table_exists}")
-        
-        if not table_exists or not table_exists[0]['exists']:
+        # Debug: Check table and count rows
+        try:
+            count_query = "SELECT COUNT(*) as count FROM ai_sources;"
+            count_result = db.execute_query(count_query)
+            logger.info(f"🔍 ai_sources row count: {count_result}")
+            
+            # Try simple select first
+            simple_query = "SELECT name, rss_url FROM ai_sources LIMIT 3;"
+            simple_result = db.execute_query(simple_query)
+            logger.info(f"🔍 Simple query result: {simple_result}")
+            
+        except Exception as debug_e:
+            logger.error(f"❌ Debug query failed: {str(debug_e)}")
             return {
-                "error": "ai_sources table does not exist",
+                "error": f"Debug query failed: {str(debug_e)}",
                 "sources": [],
                 "total_count": 0,
                 "database": "postgresql"
