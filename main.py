@@ -100,10 +100,19 @@ async def get_sources():
         db = get_database_service()
         
         sources_query = """
-            SELECT name, rss_url, website, content_type, category, priority, enabled
-            FROM ai_sources
-            WHERE enabled = TRUE
-            ORDER BY priority ASC, name ASC
+            SELECT 
+                s.name, 
+                s.rss_url, 
+                s.website, 
+                s.content_type, 
+                s.priority, 
+                s.enabled,
+                COALESCE(c.name, 'general') as category
+            FROM ai_sources s
+            LEFT JOIN ai_topics t ON s.ai_topic_id = t.id
+            LEFT JOIN ai_categories_master c ON t.category_id = c.id
+            WHERE s.enabled = TRUE
+            ORDER BY s.priority ASC, s.name ASC
         """
         
         sources = db.execute_query(sources_query)
@@ -318,11 +327,11 @@ async def get_foreign_key_options(table_name: str, column_name: str):
         if table_name == 'ai_sources':
             if column_name == 'ai_topics_id':
                 # Get options from ai_topics.id
-                query = "SELECT id, category, description FROM ai_topics WHERE enabled = true ORDER BY priority;"
+                query = "SELECT id, name, description FROM ai_topics WHERE is_active = true ORDER BY name;"
                 options = db.execute_query(query)
             elif column_name == 'category':
-                # Get options from ai_topics.category
-                query = "SELECT category, description FROM ai_topics WHERE enabled = true ORDER BY priority;"
+                # Get options from ai_categories_master
+                query = "SELECT name as category, description FROM ai_categories_master ORDER BY name;"
                 categories = db.execute_query(query)
                 options = [{'category': row['category'], 'description': row['description']} for row in categories]
         

@@ -211,15 +211,12 @@ class PostgreSQLService:
                         CREATE TABLE IF NOT EXISTS ai_sources (
                             id SERIAL PRIMARY KEY,
                             name VARCHAR(255) NOT NULL,
-                            rss_url TEXT NOT NULL,
+                            rss_url TEXT UNIQUE NOT NULL,
                             website TEXT,
                             content_type VARCHAR(50) NOT NULL,
-                            category VARCHAR(100),
                             enabled BOOLEAN DEFAULT TRUE,
                             priority INTEGER DEFAULT 5,
-                            ai_topic_id VARCHAR(100),
-                            meta_tags TEXT,
-                            description TEXT,
+                            ai_topic_id INTEGER NOT NULL REFERENCES ai_topics(id),
                             last_scraped TIMESTAMP,
                             scrape_frequency_hours INTEGER DEFAULT 6,
                             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -491,11 +488,13 @@ class PostgreSQLService:
         ]
         
         # Note: category is now derived from ai_topic_id relationship, not stored directly
-        for name, rss_url, website, content_type, category, enabled, priority in ai_sources:
+        for name, rss_url, website, content_type, _, enabled, priority in ai_sources:
+            # For now, assign a default ai_topic_id of 1 (assumes ai_topics.id=1 exists)
+            # In production, this should map to appropriate topic IDs
             cursor.execute("""
-                INSERT INTO ai_sources (name, rss_url, website, content_type, enabled, priority)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                ON CONFLICT (name) DO NOTHING
+                INSERT INTO ai_sources (name, rss_url, website, content_type, enabled, priority, ai_topic_id)
+                VALUES (%s, %s, %s, %s, %s, %s, 1)
+                ON CONFLICT (rss_url) DO NOTHING
             """, (name, rss_url, website, content_type, enabled, priority))
         
         logger.info("✅ AI sources populated successfully")
