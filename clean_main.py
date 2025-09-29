@@ -323,7 +323,7 @@ async def scrape_content_from_sources():
         db = get_database_service()
         
         # Get enabled sources
-        sources_query = "SELECT name, rss_url, content_type, category FROM ai_sources WHERE enabled = TRUE"
+        sources_query = "SELECT name, rss_url, content_type FROM ai_sources WHERE enabled = TRUE"
         sources = db.execute_query(sources_query)
         
         scraped_count = 0
@@ -2181,7 +2181,8 @@ async def update_rss_sources(request: Request):
         logger.info("🔗 Creating indexes...")
         db.execute_query("CREATE INDEX IF NOT EXISTS idx_ai_sources_enabled ON ai_sources(enabled);", fetch_results=False)
         db.execute_query("CREATE INDEX IF NOT EXISTS idx_ai_sources_priority ON ai_sources(priority);", fetch_results=False)
-        db.execute_query("CREATE INDEX IF NOT EXISTS idx_ai_sources_category ON ai_sources(category);", fetch_results=False)
+        # Skip category index since column doesn't exist
+        # db.execute_query("CREATE INDEX IF NOT EXISTS idx_ai_sources_category ON ai_sources(category);", fetch_results=False)
         db.execute_query("CREATE INDEX IF NOT EXISTS idx_ai_sources_content_type ON ai_sources(content_type);", fetch_results=False)
         
         # Get count - with error handling
@@ -2251,7 +2252,7 @@ async def get_admin_sources(request: Request, auth_service: AuthService = Depend
         db = get_database_service()
         
         sources_query = """
-            SELECT name, rss_url, website, content_type, category, priority, enabled, description
+            SELECT name, rss_url, website, content_type, priority, enabled
             FROM ai_sources
             ORDER BY priority ASC, name ASC
         """
@@ -2265,10 +2266,10 @@ async def get_admin_sources(request: Request, auth_service: AuthService = Depend
                 'rss_url': source['rss_url'],
                 'website': source.get('website', ''),
                 'content_type': source.get('content_type', 'blogs'),
-                'category': source.get('category', 'other'),
+                'category': 'general',  # Default since category column doesn't exist
                 'priority': source['priority'],
                 'enabled': source['enabled'],
-                'description': source.get('description', '')
+                'description': ''  # Description column doesn't exist in current schema
             })
         
         logger.info(f"✅ Admin sources retrieved successfully - {len(processed_sources)} sources")
@@ -2335,7 +2336,7 @@ async def admin_scrape(request: Request, auth_service: AuthService = Depends(get
         
         # Get enabled sources for scraping
         sources_query = """
-            SELECT name, rss_url, website, content_type, category, priority
+            SELECT name, rss_url, website, content_type, priority
             FROM ai_sources
             WHERE enabled = TRUE
             ORDER BY priority ASC
