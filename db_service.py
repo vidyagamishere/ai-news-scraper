@@ -655,6 +655,30 @@ class PostgreSQLService:
             logger.error(f"❌ Failed to migrate table {table_name}: {e}")
             raise e
     
+    def get_ai_sources(self) -> List[Dict[str, Any]]:
+        """Get all AI sources for scraping"""
+        try:
+            query = """
+                SELECT 
+                    s.id, 
+                    s.name, 
+                    s.rss_url, 
+                    s.website, 
+                    s.priority, 
+                    s.enabled as is_active,
+                    COALESCE(c.name, 'general') as category
+                FROM ai_sources s
+                LEFT JOIN ai_topics t ON s.ai_topic_id = t.id
+                LEFT JOIN ai_categories_master c ON t.category_id = c.id
+                WHERE s.enabled = TRUE 
+                ORDER BY s.priority DESC, s.name
+            """
+            sources = self.execute_query(query, fetch_all=True)
+            return [dict(source) for source in sources] if sources else []
+        except Exception as e:
+            logger.error(f"❌ Failed to get AI sources: {str(e)}")
+            return []
+
     def close_connections(self):
         """Close all connections in the pool"""
         if hasattr(self, 'connection_pool'):
