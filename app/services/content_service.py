@@ -10,6 +10,9 @@ import traceback
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 
+# Ensure logging is available globally as a fallback
+import logging as logging_module
+
 from db_service import get_database_service
 
 logger = logging.getLogger(__name__)

@@ -12,6 +12,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
+# Clear Python cache on startup to fix Railway caching issues
+if hasattr(sys, '_getframe'):
+    for module_name in list(sys.modules.keys()):
+        if module_name.startswith('app.'):
+            del sys.modules[module_name]
+
 # Add current directory to Python path for Railway
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
