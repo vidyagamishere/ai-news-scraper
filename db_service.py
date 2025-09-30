@@ -182,7 +182,7 @@ class PostgreSQLService:
                             image_url TEXT,
                             keywords TEXT,
                             content_type_id INTEGER REFERENCES content_types(id),
-                            ai_topic_id VARCHAR(100) REFERENCES ai_topics(id),
+                            ai_topic_id INTEGER REFERENCES ai_topics(id),
                             processing_status VARCHAR(50) DEFAULT 'pending',
                             content_hash VARCHAR(64),
                             audio_url TEXT,
@@ -198,7 +198,7 @@ class PostgreSQLService:
                         CREATE TABLE IF NOT EXISTS article_topics (
                             id SERIAL PRIMARY KEY,
                             article_id INTEGER REFERENCES articles(id) ON DELETE CASCADE,
-                            topic_id VARCHAR(100) REFERENCES ai_topics(id) ON DELETE CASCADE,
+                            topic_id INTEGER REFERENCES ai_topics(id) ON DELETE CASCADE,
                             relevance_score FLOAT DEFAULT 1.0,
                             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                             UNIQUE(article_id, topic_id)
