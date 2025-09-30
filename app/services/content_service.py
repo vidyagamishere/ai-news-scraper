@@ -13,6 +13,9 @@ from typing import Dict, Any, Optional, List
 # Ensure logging is available globally as a fallback
 import logging as logging_module
 
+# Make logging available in global namespace as a workaround
+globals()['logging'] = logging
+
 from db_service import get_database_service
 
 logger = logging.getLogger(__name__)

@@ -234,8 +234,17 @@ async def admin_scrape(
         if DEBUG:
             logger.debug("🔍 Admin permissions verified, starting scraping")
         
-        # Trigger scraping operation
-        result = content_service.scrape_content()
+        # Trigger scraping operation with detailed error handling
+        try:
+            logger.info("🔍 About to call content_service.scrape_content()")
+            result = content_service.scrape_content()
+            logger.info("🔍 Successfully called content_service.scrape_content()")
+        except NameError as ne:
+            logger.error(f"❌ NameError in scrape_content: {str(ne)}")
+            raise ne
+        except Exception as se:
+            logger.error(f"❌ Other error in scrape_content: {str(se)}")
+            raise se
         
         if DEBUG:
             logger.debug(f"🔍 Scraping completed with result: {result}")
@@ -249,12 +258,16 @@ async def admin_scrape(
         }
         
     except Exception as e:
+        import traceback
+        error_traceback = traceback.format_exc()
         logger.error(f"❌ Admin scraping endpoint failed: {str(e)}")
+        logger.error(f"❌ Full traceback: {error_traceback}")
         raise HTTPException(
             status_code=500,
             detail={
                 'error': 'Admin scraping failed',
                 'message': str(e),
+                'traceback': error_traceback,
                 'database': 'postgresql'
             }
         )
