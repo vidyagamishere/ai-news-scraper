@@ -455,7 +455,7 @@ class PostgreSQLService:
             ("videos", "Videos", "Video content and tutorials", "video", "📹"),
             ("events", "Events", "Conferences, webinars, and industry events", "events", "📅"),
             ("learning", "Learning Resources", "Courses, tutorials, and educational content", "learning", "📚"),
-            ("demos", "Demos & Tools", "Interactive demonstrations and AI tools", "demos", "🛠️")
+            ("demos", "Demos & Tools", "Interactive demonstrations and AI tools", "demos", "🛠️"),
         ]
         
         for name, display_name, description, section, icon in content_types:
