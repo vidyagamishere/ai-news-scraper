@@ -55,32 +55,68 @@ class PostgreSQLService:
     @contextmanager
     def get_db_connection(self):
         """Get database connection from pool with automatic cleanup"""
+        import os
+        DEBUG = os.getenv("DEBUG", "false").lower() == "true"
+        
         conn = None
         try:
+            if DEBUG:
+                logger.debug(f"🔍 Getting connection from pool")
             conn = self.connection_pool.getconn()
+            if DEBUG:
+                logger.debug(f"🔍 Connection acquired successfully")
             yield conn
         except Exception as e:
             if conn:
                 conn.rollback()
+                if DEBUG:
+                    logger.debug(f"🔍 Connection rolled back due to error")
             logger.error(f"❌ Database connection error: {e}")
             raise e
         finally:
             if conn:
                 self.connection_pool.putconn(conn)
+                if DEBUG:
+                    logger.debug(f"🔍 Connection returned to pool")
     
     def execute_query(self, query: str, params: tuple = None, fetch_one: bool = False, fetch_all: bool = True) -> Optional[Any]:
         """Execute a query with automatic connection management"""
-        with self.get_db_connection() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(query, params)
-                conn.commit()
-                
-                if fetch_one:
-                    return cursor.fetchone()
-                elif fetch_all:
-                    return cursor.fetchall()
-                else:
-                    return cursor.rowcount
+        import os
+        DEBUG = os.getenv("DEBUG", "false").lower() == "true"
+        
+        if DEBUG:
+            logger.debug(f"🔍 Executing query: {query[:200]}{'...' if len(query) > 200 else ''}")
+            if params:
+                logger.debug(f"🔍 Query parameters: {params}")
+        
+        try:
+            with self.get_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(query, params)
+                    conn.commit()
+                    
+                    if fetch_one:
+                        result = cursor.fetchone()
+                        if DEBUG:
+                            logger.debug(f"🔍 Query returned one result: {result}")
+                        return result
+                    elif fetch_all:
+                        results = cursor.fetchall()
+                        if DEBUG:
+                            logger.debug(f"🔍 Query returned {len(results)} results")
+                        return results
+                    else:
+                        rowcount = cursor.rowcount
+                        if DEBUG:
+                            logger.debug(f"🔍 Query affected {rowcount} rows")
+                        return rowcount
+                        
+        except Exception as e:
+            logger.error(f"❌ Query execution failed: {str(e)}")
+            if DEBUG:
+                logger.debug(f"🔍 Failed query: {query}")
+                logger.debug(f"🔍 Failed params: {params}")
+            raise e
     
     def initialize_database(self):
         """Initialize PostgreSQL database schema"""
@@ -104,13 +140,26 @@ class PostgreSQLService:
                         );
                     """)
                     
+                    # Create ai_categories_master table first
+                    cursor.execute("""
+                        CREATE TABLE IF NOT EXISTS ai_categories_master (
+                            id SERIAL PRIMARY KEY,
+                            name VARCHAR(100) UNIQUE NOT NULL,
+                            description TEXT,
+                            icon VARCHAR(20),
+                            is_active BOOLEAN DEFAULT TRUE,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        );
+                    """)
+                    
                     # Create ai_topics table
                     cursor.execute("""
                         CREATE TABLE IF NOT EXISTS ai_topics (
-                            id VARCHAR(100) PRIMARY KEY,
+                            id SERIAL PRIMARY KEY,
                             name VARCHAR(200) NOT NULL,
                             description TEXT,
                             category VARCHAR(100) NOT NULL,
+                            category_id INTEGER REFERENCES ai_categories_master(id),
                             is_active BOOLEAN DEFAULT TRUE,
                             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                         );
@@ -216,10 +265,11 @@ class PostgreSQLService:
                             content_type VARCHAR(50) NOT NULL,
                             enabled BOOLEAN DEFAULT TRUE,
                             priority INTEGER DEFAULT 5,
-                            ai_topic_id INTEGER NOT NULL REFERENCES ai_topics(id),
+                            ai_topic_id INTEGER REFERENCES ai_topics(id),
                             last_scraped TIMESTAMP,
                             scrape_frequency_hours INTEGER DEFAULT 6,
-                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                         );
                     """)
                     
@@ -291,10 +341,11 @@ class PostgreSQLService:
                     # Create optimized database views
                     self.create_database_views(cursor)
                     
-                    # Populate master data
-                    self.populate_content_types(cursor)
-                    self.populate_ai_topics(cursor)
-                    self.populate_ai_sources(cursor)
+                    # Note: Data population methods available but not called automatically
+                    # self.populate_ai_categories(cursor)
+                    # self.populate_content_types(cursor)
+                    # self.populate_ai_topics(cursor)
+                    # self.populate_ai_sources(cursor)
                     
                     conn.commit()
                     logger.info("✅ PostgreSQL database schema initialized successfully")
@@ -351,6 +402,40 @@ class PostgreSQLService:
         """)
         
         logger.info("✅ Database views created successfully")
+    
+    def populate_ai_categories(self, cursor):
+        """Populate ai_categories_master table with master categories"""
+        logger.info("📋 Populating ai_categories_master table...")
+        
+        # Check if already populated
+        cursor.execute("SELECT COUNT(*) FROM ai_categories_master")
+        count = cursor.fetchone()['count']
+        
+        if count > 0:
+            logger.info(f"📊 Found {count} existing categories, skipping population")
+            return
+        
+        categories = [
+            ("research", "Research & Academic", "AI research papers and academic content", "🔬"),
+            ("tools", "Tools & Products", "AI tools, products, and platforms", "🛠️"), 
+            ("news", "News & Updates", "Latest AI news and industry updates", "📰"),
+            ("business", "Business & Enterprise", "AI in business and enterprise applications", "💼"),
+            ("education", "Education & Training", "AI learning resources and tutorials", "📚"),
+            ("ethics", "Ethics & Safety", "AI ethics, safety, and responsible AI", "⚖️"),
+            ("policy", "Policy & Regulation", "AI governance and regulatory developments", "🏛️"),
+            ("startup", "Startups & Funding", "AI startup ecosystem and funding news", "🚀"),
+            ("platform", "Platforms & Infrastructure", "AI platforms and cloud services", "☁️"),
+            ("hardware", "Hardware & Computing", "AI chips and computing infrastructure", "💾")
+        ]
+        
+        for name, description, detail, icon in categories:
+            cursor.execute("""
+                INSERT INTO ai_categories_master (name, description, icon)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (name) DO NOTHING
+            """, (name, description, icon))
+        
+        logger.info("✅ AI categories populated successfully")
     
     def populate_content_types(self, cursor):
         """Populate content_types table with master data"""
@@ -420,11 +505,16 @@ class PostgreSQLService:
         ]
         
         for topic_id, name, description, category in ai_topics:
+            # Get category_id from ai_categories_master
+            cursor.execute("SELECT id FROM ai_categories_master WHERE name = %s", (category,))
+            category_result = cursor.fetchone()
+            category_id = category_result['id'] if category_result else None
+            
             cursor.execute("""
-                INSERT INTO ai_topics (id, name, description, category, is_active)
+                INSERT INTO ai_topics (name, description, category, category_id, is_active)
                 VALUES (%s, %s, %s, %s, %s)
-                ON CONFLICT (id) DO NOTHING
-            """, (topic_id, name, description, category, True))
+                ON CONFLICT (name) DO NOTHING
+            """, (name, description, category, category_id, True))
         
         logger.info("✅ AI topics populated successfully")
     
